@@ -13,7 +13,7 @@ Build a multi-agent AI development team consisting of a **Manager**, **Business 
 | LLM Provider | OpenRouter API | Single API, access to multiple models |
 | Agent Framework | LangChain + LangGraph | Mature, well-documented, supports multi-agent |
 | API Framework | FastAPI | Async, auto OpenAPI docs, modern |
-| Memory | In-memory → SQLite (later) | Start simple, persist later |
+| Memory | SQLite with SQLModel | Persistent conversation history from the start |
 | Agent Collaboration | Manager-orchestrated | Manager routes tasks to specialist agents |
 | Code Execution | None (write-only) | Agents generate code, don't execute |
 | File Access | Yes (designated workspace) | Agents read/write project files |
@@ -80,18 +80,32 @@ llm = ChatOpenAI(
 
 ### Step 2: Add Conversation Memory
 
-**Goal:** The chatbot remembers previous messages within a session.
+**Goal:** The chatbot remembers previous messages within a session, persisted to SQLite.
 
-**What you'll learn:** LangChain memory, conversation history, session management.
+**What you'll learn:** LangChain memory with SQL persistence, conversation history, session management, SQLModel.
 
 **Tasks:**
 
 1. Add session/conversation ID support (UUID-based)
-2. Implement in-memory conversation store (Python dict of session_id → message history)
-3. Use `ChatMessageHistory` and `RunnableWithMessageHistory` from LangChain
-4. Update `/chat` endpoint to accept an optional `session_id`
-5. Add endpoint to list/clear sessions
-6. Add system prompt support
+2. Set up SQLite database with SQLModel:
+   - Create `app/db/` directory with `__init__.py`, `database.py`, and `models.py`
+   - Define SQLModel table for sessions and messages
+   - Configure database connection with async support (`aiosqlite`)
+3. Implement SQLite-backed conversation store using LangChain's `SQLChatMessageHistory`
+4. Use `ChatMessageHistory` and `RunnableWithMessageHistory` from LangChain with SQL backend
+5. Update `/chat` endpoint to accept an optional `session_id`
+6. Add endpoint to list/clear sessions
+7. Add system prompt support
+
+**Project Structure Update:**
+
+```
+app/
+├── db/
+│   ├── __init__.py
+│   ├── database.py         # SQLite connection and session management
+│   └── models.py           # SQLModel database models
+```
 
 **API Endpoints (updated):**
 
@@ -100,21 +114,51 @@ llm = ChatOpenAI(
 - `DELETE /api/v1/sessions/{session_id}` — Clear a session
 - `GET /api/v1/sessions/{session_id}/history` — Get conversation history
 
+**Key Implementation Details:**
+
+```python
+# Using LangChain's SQLChatMessageHistory for persistence
+from langchain_community.chat_message_histories import SQLChatMessageHistory
+
+history = SQLChatMessageHistory(
+    session_id=session_id,
+    connection_string="sqlite:///./chat_history.db"
+)
+```
+
 **Acceptance Criteria:**
 
 - [ ] Sending messages with the same `session_id` retains conversation context
 - [ ] New session created automatically if no `session_id` provided
 - [ ] Can retrieve full conversation history for a session
+- [ ] Conversation history persists after server restart (SQLite)
+- [ ] Sessions and messages are stored in relational database tables
 
 ---
 
-### BA Agent Persona Integration
+### Step 3: Role-Based Agent Personas
 
-Goal: Create a Business Analyst (BA) persona that reliably converts vague user requests into structured, testable requirements and user stories.
+**Goal:** Create specialized agent personas (BA, Dev, Tester, Manager) with distinct roles, system prompts, and responsibilities.
 
-What you'll learn: system prompt design, structured outputs (JSON), clarifying-question loops, lightweight validation.
+**What you'll learn:** System prompt design, structured outputs (JSON), agent specialization, role-based configuration.
 
-Tasks (detailed):
+**Tasks:**
+
+This step consists of four sub-sections:
+1. BA Agent Persona Integration
+2. Dev Agent Persona Integration  
+3. Tester Agent Persona Integration
+4. Manager Agent Persona Integration
+
+---
+
+#### 3.1 BA Agent Persona Integration
+
+**Goal:** Create a Business Analyst (BA) persona that reliably converts vague user requests into structured, testable requirements and user stories.
+
+**What you'll learn:** system prompt design, structured outputs (JSON), clarifying-question loops, lightweight validation.
+
+**Tasks (detailed):**
 1. Persona config (example `agent_config.yaml` entry):
 
 ```yaml
@@ -182,13 +226,13 @@ class BAResponse(BaseModel):
 
 ---
 
-### Dev Agent Persona Integration
+#### 3.2 Dev Agent Persona Integration
 
-Goal: Create a Developer (Dev) persona that turns verified requirements into well-structured code, with safe file-write behavior and quality checks.
+**Goal:** Create a Developer (Dev) persona that turns verified requirements into well-structured code, with safe file-write behavior and quality checks.
 
-What you'll learn: code generation patterns, tool binding for file operations, safety checks (linters/tests), multi-file planning.
+**What you'll learn:** code generation patterns, tool binding for file operations, safety checks (linters/tests), multi-file planning.
 
-Tasks (detailed):
+**Tasks (detailed):
 1. Persona config sample (`agent_config.yaml`):
 
 ```yaml
@@ -239,13 +283,13 @@ dev:
 
 ---
 
-### Tester Agent Persona Integration
+#### 3.3 Tester Agent Persona Integration
 
-Goal: Create a Tester persona that inspects code artifacts, writes tests, and produces prioritized test plans and risk analyses.
+**Goal:** Create a Tester persona that inspects code artifacts, writes tests, and produces prioritized test plans and risk analyses.
 
-What you'll learn: automated test generation, test prioritization, coverage reporting, mapping tests to artifacts.
+**What you'll learn:** automated test generation, test prioritization, coverage reporting, mapping tests to artifacts.
 
-Tasks (detailed):
+**Tasks (detailed):
 1. Persona config sample:
 
 ```yaml
@@ -288,13 +332,13 @@ tester:
 
 ---
 
-### Manager Agent Persona Integration
+#### 3.4 Manager Agent Persona Integration
 
-Goal: Create a Manager that orchestrates BA, Dev, and Tester with clear task lifecycle management, retries, and aggregation of outputs.
+**Goal:** Create a Manager that orchestrates BA, Dev, and Tester with clear task lifecycle management, retries, and aggregation of outputs.
 
-What you'll learn: orchestration patterns, state management, conditional routing, merging agent outputs.
+**What you'll learn:** orchestration patterns, state management, conditional routing, merging agent outputs.
 
-Tasks (detailed):
+**Tasks (detailed):
 1. Persona config sample:
 
 ```yaml
@@ -727,6 +771,34 @@ app/
 - [ ] Graceful handling of API failures
 
 ---
+
+### Security, Safety & Operational Requirements
+
+These requirements capture high-priority safety, validation, and operational controls discovered during a recent review. They must be treated as mandatory design constraints before enabling agent file writes or persisting full agent transcripts.
+
+- **LLM output validation (Critical):** All structured outputs produced by agents (BA, Dev, Tester, Manager) MUST be validated against a formal schema (JSON Schema or Pydantic model). On validation failure, the system MUST automatically re-prompt the model with (a) the original output, (b) the validation error details, and (c) a concise instruction to return only the corrected structured payload. Use function-calling / structured output features where available. Enforce a capped retry loop (e.g., 3 attempts) and a clear, auditable fallback error when retries are exhausted.
+
+- **File-write safety (High):** Implement and enforce a single `app/tools/file_tools.py::write_file(path, content, project_id, *, dry_run=False)` API that:
+  - canonicalizes and normalizes paths and refuses `..` segments or absolute paths
+  - enforces a workspace whitelist (writes only under `workspace/{project_id}`)
+  - refuses writes to protected paths (`.git/`, CI configs, system paths) unless explicitly approved via an elevated human-approval workflow
+  - enforces size limits and optional content-type checks
+  - supports `dry_run=True` to return diffs without mutating disk
+  - logs intended writes (path, size, checksum) to an audit store before applying
+
+- **Secrets, redaction & audit logs (High):** Do not persist raw prompts/responses that may contain secrets or PII without redaction. Implement a redaction pipeline that removes API keys, tokens, private keys, and emails before storing. If full transcripts are required for debugging, encrypt them at rest and restrict access via RBAC. Document retention policies and provide configurable retention/rotation.
+
+- **Orchestration semantics & reliability (Medium):** Manager endpoints that start long-running work SHOULD return `202 Accepted` with a `task_id` and accept idempotency keys. Persist task state (SQLite or small job DB) and expose status/streaming endpoints. Implement `max_retries`, exponential backoff, last_attempt, retry_count, and error_reason fields on task records.
+
+- **RAG / retrieval safety (Medium):** When including retrieved context in prompts, always attach provenance (source pointer, character offsets, short summary). Limit the total injected characters and sanitize retrieved text to remove instruction-like fragments or code fences that may prompt-inject the agent. Store fingerprints for traceability.
+
+- **Configuration, determinism & testing (Low):** Standardize canonical config paths (e.g. `app/config/agents.yaml` or `agent_config.yaml` — pick one and document). Prefer low temperature settings for structured outputs. Add deterministic unit tests that mock LLMs and retrievers, and CI jobs that run linters/formatters (`ruff`/`black`) on generated code artifacts.
+
+**Immediate recommended engineering tasks:**
+1. Add authoritative Pydantic/JSON Schema definitions to `app/models/schemas.py` and implement the validation + re-prompt loop for all agent output paths.
+2. Create `app/tools/file_tools.py` (if not present) implementing the safety checklist above and add unit tests for path canonicalization, whitelist enforcement, and dry-run behavior.
+3. Add a short section in `REQUIREMENTS.md` (this file) describing audit log retention and redaction rules and wire those rules into the Manager's audit logging design.
+
 
 ### Step 12: Authentication & Multi-Tenancy
 
