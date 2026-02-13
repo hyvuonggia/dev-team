@@ -11,9 +11,11 @@ load_dotenv(dotenv_path=".env")
 
 class Settings:
     OPENROUTER_API_KEY: Optional[str] = os.getenv("OPENROUTER_API_KEY")
-    OPENAI_API_BASE: str = os.getenv("OPENAI_API_BASE", "https://openrouter.ai/api/v1")
-    OPENAI_API_TYPE: Optional[str] = os.getenv("OPENAI_API_TYPE")
-    OPENAI_API_VERSION: Optional[str] = os.getenv("OPENAI_API_VERSION")
+    OPENAI_API_BASE: str = (
+        os.getenv("OPENAI_API_BASE") or "https://openrouter.ai/api/v1"
+    )
+    # model to use for ChatOpenAI
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL")
 
 
 settings = Settings()
