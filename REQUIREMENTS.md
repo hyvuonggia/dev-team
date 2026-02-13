@@ -110,133 +110,254 @@ llm = ChatOpenAI(
 
 ### BA Agent Persona Integration
 
-**Goal:** Create a Business Analyst (BA) persona as the first specialized agent.
+Goal: Create a Business Analyst (BA) persona that reliably converts vague user requests into structured, testable requirements and user stories.
 
-**What you'll learn:** System prompt design, role-specific behavior, isolated API endpoints.
+What you'll learn: system prompt design, structured outputs (JSON), clarifying-question loops, lightweight validation.
 
-**Tasks:**
-1. Create persona definition for BA:
-   - Role: Business Analyst
-   - Name: "BA"
-   - System prompt: Instructs agent to analyze requirements, write user stories, acceptance criteria, and ask clarifying questions
-   - Expertise: Requirements gathering, user story writing, workflow analysis
-2. Update persona configuration in `config/personas.yaml` (or similar)
-3. Implement BA-specific logic in `app/agents/ba.py`:
-   - Analyze incoming user request
-   - Generate user stories or acceptance criteria
-   - Ask clarifying questions when needed
-4. Add dedicated endpoint `/api/v1/ba/analyze` that accepts a request message and returns BA analysis
-5. Add unit tests verifying BA's analysis quality
-6. Update main chat endpoint to route "analyze" requests to BA persona
+Tasks (detailed):
+1. Persona config (example `agent_config.yaml` entry):
 
-**API Endpoints:**
-- `POST /api/v1/ba/analyze` — Analyze a business requirement
+```yaml
+ba:
+  role: "Business Analyst"
+  name: "BA"
+  model: "anthropic/claude-3.5-sonnet"
+  temperature: 0.5
+  system_prompt: |
+    You are BA, a Business Analyst. Your job is to analyze user requests, produce clear user stories,
+    acceptance criteria, and ask short clarifying questions when requirements are ambiguous. Always
+    return structured JSON following the schema requested.
+```
 
-**Acceptance Criteria:**
-- [ ] BA can analyze a user request and produce structured requirements/user stories
-- [ ] Analysis is returned in a consistent JSON format
-- [ ] BA asks clarifying questions when requirements are ambiguous
-- [ ] Dedicated endpoint works independently of chat flow
+2. System prompt template (use for prompt engineering):
+
+```
+SYSTEM: You are BA. Input: free-text user request. Output: JSON with keys: title, description,
+user_stories (array of {id,title,description,acceptance_criteria}), questions (array of clarifying Qs),
+priority. If the request is ambiguous, ask up to 3 clarifying questions instead of producing stories.
+```
+
+3. Implement in `app/agents/ba.py`:
+- Provide a function `run_ba_analysis(request_text) -> dict` that:
+  - Validates request length and canonicalizes whitespace
+  - Calls the LLM with system prompt + user text
+  - Parses and validates the returned JSON (pydantic model)
+  - If LLM returns questions (ambiguity), return them and set status `clarify`
+  - Otherwise return structured requirements and user stories
+
+4. Tools & permissions:
+- BA gets read access to project docs and conversation history (to ground analysis)
+- BA should not write source code files; can create requirement docs (`.md` or `.yaml`)
+
+5. Request/response schema (Pydantic suggested):
+
+```python
+class BARequest(BaseModel):
+    text: str
+    project_id: Optional[str]
+
+class UserStory(BaseModel):
+    id: str
+    title: str
+    description: str
+    acceptance_criteria: List[str]
+
+class BAResponse(BaseModel):
+    title: str
+    description: str
+    user_stories: List[UserStory]
+    questions: List[str]
+    priority: Optional[str]
+```
+
+6. Endpoint: `/api/v1/ba/analyze` accepts `BARequest`, returns `BAResponse`.
+
+7. Unit tests and validation:
+- Test that ambiguous input generates clarifying questions
+- Test that concrete input produces at least one user story with acceptance criteria
+- Test JSON parsing resilience and schema validation failures
+
+8. RAG/retrieval note:
+- When `project_id` is provided, BA should call a retriever (vector DB or file search) to fetch relevant docs and include short summaries in the prompt (top-k snippets). Store a pointer to retrieved docs in task artifacts.
 
 ---
 
 ### Dev Agent Persona Integration
 
-**Goal:** Create a Developer (Dev) persona as the second specialized agent.
+Goal: Create a Developer (Dev) persona that turns verified requirements into well-structured code, with safe file-write behavior and quality checks.
 
-**What you'll learn:** Code generation, architectural decision-making, implementation patterns.
+What you'll learn: code generation patterns, tool binding for file operations, safety checks (linters/tests), multi-file planning.
 
-**Tasks:**
-1. Create persona definition for Dev:
-   - Role: Developer
-   - Name: "Dev"
-   - System prompt: Instructs agent to design and write code implementing requirements
-   - Expertise: Software design, coding best practices, technical explanations
-2. Implement Dev-specific logic in `app/agents/developer.py`:
-   - Receive analyzed requirements from BA
-   - Design appropriate solution architecture
-   - Write code implementing the solution
-   - Explain technical decisions
-3. Add endpoint `/api/v1/dev/generate` that accepts implementation requests
-4. Configure Dev to accept file operations tools for writing code
-5. Add validation to ensure generated code follows project standards
-6. Add tests for generated code quality checks
+Tasks (detailed):
+1. Persona config sample (`agent_config.yaml`):
 
-**API Endpoints:**
-- `POST /api/v1/dev/generate` — Generate code implementation
+```yaml
+dev:
+  role: "Developer"
+  name: "Dev"
+  model: "anthropic/claude-3.5-sonnet"
+  temperature: 0.2
+  system_prompt: |
+    You are Dev. Given verified requirements and user stories, produce a minimal, well-structured
+    implementation. Prefer readability and tests. When writing code, return exact file paths and file
+    contents in a structured JSON payload. Do not execute code.
+```
 
-**Acceptance Criteria:**
-- [ ] Dev can transform analyzed requirements into working code
-- [ ] Generated code follows established patterns
-- [ ] Dev provides explanations of technical choices
-- [ ] Dev can write files to the workspace directory
+2. Implement in `app/agents/developer.py`:
+- Key function: `generate_implementation(task: Task, context: Optional[List[str]]) -> ImplementationResult`
+  - Plan: produce a file map (path -> content) before writing anything
+  - Validate the plan with Manager (or unit step) and then perform file writes via file_tools
+  - Run static checks (invoke a formatting/linting tool process on the generated code via a CI step — simulated in tests)
+  - Return metadata: created_files, diffs, explanations for each file
+
+3. File write safety and sandboxing:
+- All writes go through `app/tools/file_tools.py::write_file(path, content, project_id)` which enforces sandboxing and normalization
+
+4. Output format (example JSON):
+
+```json
+{
+  "plan": [{"path":"app/routes/users.py","summary":"User routes"}],
+  "files": [{"path":"app/routes/users.py","content":"..."}],
+  "explanations": {"app/routes/users.py":"Why this structure"}
+}
+```
+
+5. Endpoint: `/api/v1/dev/generate` — accepts task id or analyzed requirements; return plan and (optionally) write files.
+
+6. Validation and tests:
+- Lint generated code with a chosen linter (flake8/ruff) in CI or as a test step
+- Unit tests that check the `files` JSON is well formed and paths are under workspace
+- Integration test: run pytest in a sandboxed environment (optional)
+
+7. RAG/retrieval note:
+- Before generation, Dev should retrieve relevant code context (from vector DB or file search) so it can reference existing modules and avoid duplicate implementations. Use a retriever to get top-k code snippets and include them in the planning prompt.
+
+8. Extra features:
+- Support a `dry_run` mode where Dev returns the plan but does not write files
+- Provide `explain_changes` option where Dev summarizes why files were added/modified
 
 ---
 
 ### Tester Agent Persona Integration
 
-**Goal:** Create a Tester (Tester) persona as the third specialized agent.
+Goal: Create a Tester persona that inspects code artifacts, writes tests, and produces prioritized test plans and risk analyses.
 
-**What you'll learn:** Test case generation, quality assurance, edge case analysis.
+What you'll learn: automated test generation, test prioritization, coverage reporting, mapping tests to artifacts.
 
-**Tasks:**
-1. Create persona definition for Tester:
-   - Role: Tester
-   - Name: "Tester"
-   - System prompt: Instructs agent to write test cases, review code quality, and identify edge cases
-   - Expertise: Test design, quality assurance, bug identification
-2. Implement Tester-specific logic in `app/agents/tester.py`:
-   - Review code artifacts from Dev
-   - Generate comprehensive test cases (unit, integration, edge cases)
-   - Provide feedback on code quality and potential issues
-3. Add endpoint `/api/v1/tester/review` that accepts code references and returns review
-4. Configure Tester to use file reading tools for code analysis
-5. Add functionality to generate test documentation
-6. Implement test case prioritization based on risk
+Tasks (detailed):
+1. Persona config sample:
 
-**API Endpoints:**
-- `POST /api/v1/tester/review` — Review code and generate tests
+```yaml
+tester:
+  role: "Tester"
+  name: "Tester"
+  model: "google/gemini-pro"
+  temperature: 0.1
+  system_prompt: |
+    You are Tester. Given code artifacts, produce unit and integration test cases, a prioritized test
+    plan, and a short risk assessment. Output tests in files and provide commands to run them.
+```
 
-**Acceptance Criteria:**
-- [ ] Tester can generate meaningful test cases from code artifacts
-- [ ] Test cases cover main functionality and edge cases
-- [ ] Tester provides constructive feedback on code quality
-- [ ] Tester can create test files in the workspace
+2. Implement in `app/agents/tester.py`:
+- Key function: `review_and_generate_tests(artifact_refs: List[ArtifactRef]) -> TestPlan`
+  - Read the target source files via `read_file` tool
+  - Identify public APIs, edge cases, and dependency points
+  - Produce test files (pytest style) and a test matrix mapping tests -> source files
+  - Provide a prioritized list and estimated effort for each test
+
+3. Output example:
+
+```json
+{
+  "tests": [{"path":"tests/test_users.py","content":"..."}],
+  "matrix": [{"source":"app/routes/users.py","tests":["tests/test_users.py"]}],
+  "priority": ["smoke","critical","others"],
+  "coverage_commands": "pytest --maxfail=1 --disable-warnings -q"
+}
+```
+
+4. Endpoint: `/api/v1/tester/review` accepts references to artifacts or project_id and returns a TestPlan and created test files.
+
+5. Validation and CI:
+- Run generated tests in a sandboxed environment (optional) and return results as `tool_result`
+- Provide a coverage estimate or a guide to run coverage tools
+
+6. RAG/retrieval note:
+- Tester should retrieve related code snippets and previous bug reports from project history to prioritize tests. Store references to where each test originated.
 
 ---
 
 ### Manager Agent Persona Integration
 
-**Goal:** Create a Manager persona to coordinate the agent team.
+Goal: Create a Manager that orchestrates BA, Dev, and Tester with clear task lifecycle management, retries, and aggregation of outputs.
 
-**What you'll learn:** Orchestration patterns, team coordination, request routing.
+What you'll learn: orchestration patterns, state management, conditional routing, merging agent outputs.
 
-**Tasks:**
-1. Create persona definition for Manager:
-   - Role: Manager
-   - Name: "Manager"
-   - System prompt: Instructs agent to understand user requests, break them down, assign to appropriate agents, and compile results
-   - Expertise: Workflow management, delegation, quality control
-2. Implement Manager logic in `app/agents/manager.py`:
-   - Parse incoming user requests
-   - Determine which specialist agents to involve
-   - Coordinate multi-agent workflow
-   - Synthesize final response from agent outputs
-3. Add endpoint `/api/v1/manager/route` that accepts high-level requests
-4. Configure Manager to track task status and agent assignments
-5. Implement feedback loops (e.g., Manager can send Dev's code to Tester for review)
-6. Add status tracking for ongoing team tasks
+Tasks (detailed):
+1. Persona config sample:
 
-**API Endpoints:**
-- `POST /api/v1/manager/route` — Route a user request through the agent team
+```yaml
+manager:
+  role: "Manager"
+  name: "Manager"
+  model: "anthropic/claude-3.5-sonnet"
+  temperature: 0.3
+  system_prompt: |
+    You are Manager. Receive a user request, decide if BA/Dev/Tester are needed, create tasks with
+    clear acceptance criteria, and coordinate agent calls. Keep task state and produce a final
+    synthesized response that includes artifacts and next steps.
+```
 
-**Acceptance Criteria:**
-- [ ] Manager can understand user requests and break them into steps
-- [ ] Manager routes tasks to appropriate agents (BA, Dev, Tester)
-- [ ] Manager coordinates multi-step workflows
-- [ ] Manager synthesizes complete response from agent contributions
+2. Implement manager logic in `app/agents/manager.py`:
+- Main function: `route_request(user_request) -> TaskResult`
+  - Step A: Triage (is this a small ask the Dev can implement directly, or does it need BA?)
+  - Step B: Create Task(s) with unique IDs and status `pending`
+  - Step C: Call BA if requirements unclear; wait for `clarify` or `done`
+  - Step D: Call Dev with analyzed requirements or plan; validate plan
+  - Step E: Send Dev artifacts to Tester for review
+  - Step F: Aggregate outputs, update Task `completed` and store artifacts
 
----
+3. State & persistence:
+- Task model should be persisted (SQLite) with fields: id, status, assigned_agents, artifacts, agent_messages, timestamps
+- Manager should write audit logs of every agent call including LLM prompts, responses, and retrieved context pointers
+
+4. Tooling & retries:
+- Manager uses retriever to fetch relevant project context before calling agents
+- Implement retry/backoff for failing agent calls and a `max_retries` policy
+
+5. Example orchestration pseudocode:
+
+```python
+def route_request(request):
+    task = create_task(request)
+    if needs_ba(request):
+        ba_resp = BA.run(request)
+        if ba_resp.questions:
+            task.status = 'waiting_for_clarification'
+            return ba_resp.questions
+        requirements = ba_resp.user_stories
+    else:
+        requirements = synth_requirements(request)
+
+    dev_plan = Dev.generate(requirements)
+    write_files(dev_plan.files)
+    test_plan = Tester.review_and_generate_tests(dev_plan.artifacts)
+    task.complete(dev_plan, test_plan)
+    return compile_final_response(task)
+```
+
+6. Endpoints: `/api/v1/manager/route` — accepts a user request, returns a `task_id` and immediate status; use `/api/v1/team/status/{task_id}` to poll for completion or stream events via SSE.
+
+7. Acceptance criteria and observability:
+- Manager must always return a task with traceable agent outputs
+- All intermediate artifacts and agent messages stored and queryable via task endpoints
+- Provide an event log for streaming clients (tool calls, tool results, tokens)
+
+8. Tests and failure modes:
+- Simulate failing Dev outputs and ensure Manager retries/is able to request fixes from Dev
+- Ensure Manager safely aborts if required external resources (vector DB, DB) are unavailable and returns clear error messages
+
 
 ### Multi-Agent Orchestration with LangGraph
 
