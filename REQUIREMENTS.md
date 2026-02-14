@@ -221,9 +221,6 @@ class BAResponse(BaseModel):
 - Test that concrete input produces at least one user story with acceptance criteria
 - Test JSON parsing resilience and schema validation failures
 
-8. RAG/retrieval note:
-- When `project_id` is provided, BA should call a retriever (vector DB or file search) to fetch relevant docs and include short summaries in the prompt (top-k snippets). Store a pointer to retrieved docs in task artifacts.
-
 ---
 
 #### 3.2 Dev Agent Persona Integration
@@ -731,6 +728,11 @@ app/
 4. BA agent creates comprehensive documentation (multiple docs)
 5. Tester agent creates test files that correspond to source files
 6. Add context window management (summarize large files, prioritize relevant context)
+
+**RAG/retrieval for BA Agent** (moved from Step 3.1):
+- When `project_id` is provided, BA should call a retriever (vector DB or file search) to fetch relevant docs and include short summaries in the prompt (top-k snippets)
+- Store a pointer to retrieved docs in task artifacts
+- This provides context grounding for BA analysis based on existing project documentation
 
 **New tools:**
 
