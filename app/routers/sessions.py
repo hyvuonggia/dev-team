@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from pydantic import BaseModel
 
 from app.chat_memory import list_session_ids, clear_session, get_session_history
 from app.models.schemas import (
@@ -9,13 +8,10 @@ from app.models.schemas import (
     SessionInfo,
     SessionHistoryResponse,
     MessageHistory,
+    DeleteSessionResponse,
 )
 
 router = APIRouter()
-
-
-class DeleteSessionResponse(BaseModel):
-    message: str
 
 
 @router.get("/sessions", response_model=SessionsResponse)

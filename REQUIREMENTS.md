@@ -64,7 +64,7 @@ Build a multi-agent AI development team consisting of a **Manager**, **Business 
 from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(
-    model="anthropic/claude-3.5-sonnet",
+    model="nvidia/nemotron-3-nano-30b-a3b:free",
     openai_api_key="your-openrouter-key",
     openai_api_base="https://openrouter.ai/api/v1",
 )
@@ -165,7 +165,7 @@ This step consists of four sub-sections:
 ba:
   role: "Business Analyst"
   name: "BA"
-  model: "anthropic/claude-3.5-sonnet"
+  model: "nvidia/nemotron-3-nano-30b-a3b:free"
   temperature: 0.5
   system_prompt: |
     You are BA, a Business Analyst. Your job is to analyze user requests, produce clear user stories,
@@ -236,7 +236,7 @@ class BAResponse(BaseModel):
 dev:
   role: "Developer"
   name: "Dev"
-  model: "anthropic/claude-3.5-sonnet"
+  model: "nvidia/nemotron-3-nano-30b-a3b:free"
   temperature: 0.2
   system_prompt: |
     You are Dev. Given verified requirements and user stories, produce a minimal, well-structured
@@ -271,10 +271,7 @@ dev:
 - Unit tests that check the `files` JSON is well formed and paths are under workspace
 - Integration test: run pytest in a sandboxed environment (optional)
 
-7. RAG/retrieval note:
-- Before generation, Dev should retrieve relevant code context (from vector DB or file search) so it can reference existing modules and avoid duplicate implementations. Use a retriever to get top-k code snippets and include them in the planning prompt.
-
-8. Extra features:
+7. Extra features:
 - Support a `dry_run` mode where Dev returns the plan but does not write files
 - Provide `explain_changes` option where Dev summarizes why files were added/modified
 
@@ -342,7 +339,7 @@ tester:
 manager:
   role: "Manager"
   name: "Manager"
-  model: "anthropic/claude-3.5-sonnet"
+  model: "nvidia/nemotron-3-nano-30b-a3b:free"
   temperature: 0.3
   system_prompt: |
     You are Manager. Receive a user request, decide if BA/Dev/Tester are needed, create tasks with
@@ -684,13 +681,13 @@ app/
    ```yaml
    agents:
      manager:
-       model: "anthropic/claude-3.5-sonnet"
+       model: "nvidia/nemotron-3-nano-30b-a3b:free"
        temperature: 0.3
      ba:
-       model: "anthropic/claude-3.5-sonnet"
+       model: "nvidia/nemotron-3-nano-30b-a3b:free"
        temperature: 0.5
      dev:
-       model: "anthropic/claude-3.5-sonnet"
+       model: "nvidia/nemotron-3-nano-30b-a3b:free"
        temperature: 0.2
      tester:
        model: "google/gemini-pro"
@@ -733,6 +730,11 @@ app/
 - When `project_id` is provided, BA should call a retriever (vector DB or file search) to fetch relevant docs and include short summaries in the prompt (top-k snippets)
 - Store a pointer to retrieved docs in task artifacts
 - This provides context grounding for BA analysis based on existing project documentation
+
+**RAG/retrieval for Dev Agent** (moved from Step 3.2):
+- Before generation, Dev should retrieve relevant code context (from vector DB or file search) so it can reference existing modules and avoid duplicate implementations
+- Use a retriever to get top-k code snippets and include them in the planning prompt
+- This enables context-aware code generation that respects existing patterns and architecture
 
 **New tools:**
 
