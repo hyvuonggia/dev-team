@@ -245,9 +245,9 @@ dev:
 ```
 
 2. Implement in `app/agents/developer.py`:
-- Key function: `generate_implementation(task: Task, context: Optional[List[str]]) -> ImplementationResult`
+- Key function: `async def generate_implementation(task_description: str, user_stories: Optional[List[UserStory]] = None, context: Optional[List[str]] = None, project_id: Optional[str] = None, dry_run: bool = False, explain_changes: bool = True) -> ImplementationResult`
   - Plan: produce a file map (path -> content) before writing anything
-  - Validate the plan with Manager (or unit step) and then perform file writes via file_tools
+  - Uses LangChain's `with_structured_output` for guaranteed valid JSON schema adherence
   - Run static checks (invoke a formatting/linting tool process on the generated code via a CI step — simulated in tests)
   - Return metadata: created_files, diffs, explanations for each file
 
