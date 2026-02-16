@@ -290,7 +290,7 @@ dev:
 tester:
   role: "Tester"
   name: "Tester"
-  model: "google/gemini-pro"
+  model: "nvidia/nemotron-3-nano-30b-a3b:free"
   temperature: 0.1
   system_prompt: |
     You are Tester. Given code artifacts, produce unit and integration test cases, a prioritized test
@@ -320,9 +320,6 @@ tester:
 5. Validation and CI:
 - Run generated tests in a sandboxed environment (optional) and return results as `tool_result`
 - Provide a coverage estimate or a guide to run coverage tools
-
-6. RAG/retrieval note:
-- Tester should retrieve related code snippets and previous bug reports from project history to prioritize tests. Store references to where each test originated.
 
 ---
 
@@ -690,7 +687,7 @@ app/
        model: "nvidia/nemotron-3-nano-30b-a3b:free"
        temperature: 0.2
      tester:
-       model: "google/gemini-pro"
+       model: "nvidia/nemotron-3-nano-30b-a3b:free"
        temperature: 0.1
    ```
 2. Each agent instantiates its own LLM with role-specific settings
@@ -735,6 +732,12 @@ app/
 - Before generation, Dev should retrieve relevant code context (from vector DB or file search) so it can reference existing modules and avoid duplicate implementations
 - Use a retriever to get top-k code snippets and include them in the planning prompt
 - This enables context-aware code generation that respects existing patterns and architecture
+
+**RAG/retrieval for Tester Agent** (moved from Step 3.3):
+- Tester should retrieve related code snippets and previous bug reports from project history to prioritize tests
+- Store references to where each test originated
+- Use historical bug data to identify high-risk areas that need more thorough testing
+- Retrieve similar test patterns from existing test suites for consistency
 
 **New tools:**
 

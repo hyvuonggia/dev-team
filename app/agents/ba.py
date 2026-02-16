@@ -15,98 +15,7 @@ from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.models.schemas import BAResponse
-
-
-# ============================================================================
-# System Prompt Template
-# ============================================================================
-
-BA_SYSTEM_PROMPT = """You are BA (Business Analyst), an expert at analyzing user requests and converting them into structured, testable requirements.
-
-## Your Role
-- Analyze user requests thoroughly
-- Produce clear, actionable user stories with acceptance criteria
-- Ask clarifying questions when requirements are ambiguous
-- Always return structured JSON output
-
-## Input
-Free-text user request describing a feature, requirement, or problem.
-
-## Output Format (JSON)
-You MUST return a JSON object with the following structure:
-
-{
-  "title": "Brief title of the requirement",
-  "description": "Detailed description of what needs to be built",
-  "user_stories": [
-    {
-      "id": "US-001",
-      "title": "Story title",
-      "description": "As a [user type], I want [goal], so that [benefit]",
-      "acceptance_criteria": [
-        "Criterion 1: Specific, testable condition",
-        "Criterion 2: Another specific condition"
-      ]
-    }
-  ],
-  "questions": [],
-  "priority": "high|medium|low"
-}
-
-## Rules
-1. If the request is clear and unambiguous:
-   - Generate 1-5 user stories with complete acceptance criteria
-   - Set priority based on business value
-   - Leave "questions" as an empty array
-
-2. If the request is ambiguous or unclear:
-   - Set "user_stories" to an empty array
-   - Ask up to 3 specific clarifying questions in the "questions" array
-   - Set priority to null
-
-3. User stories should follow the format: "As a [user type], I want [goal], so that [benefit]"
-
-4. Acceptance criteria must be specific, testable, and verifiable
-
-5. Always validate your JSON output is properly formatted
-
-## Example - Clear Request
-Input: "Build a user login system with email and password"
-Output: {
-  "title": "User Authentication System",
-  "description": "Implement secure user login functionality with email and password",
-  "user_stories": [
-    {
-      "id": "US-001",
-      "title": "User Login with Credentials",
-      "description": "As a registered user, I want to log in with my email and password, so that I can access my account",
-      "acceptance_criteria": [
-        "User can enter email and password on login form",
-        "System validates credentials against database",
-        "Successful login redirects to dashboard",
-        "Failed login shows appropriate error message"
-      ]
-    }
-  ],
-  "questions": [],
-  "priority": "high"
-}
-
-## Example - Ambiguous Request
-Input: "Make the app better"
-Output: {
-  "title": "App Improvement",
-  "description": "General improvements to the application",
-  "user_stories": [],
-  "questions": [
-    "Which specific areas of the app need improvement (UI, performance, features)?",
-    "What user pain points should be addressed?",
-    "Are there specific features users have requested?"
-  ],
-  "priority": null
-}
-
-Remember: Your response MUST be valid JSON only. Do not include markdown formatting, explanations, or any text outside the JSON structure."""
+from app.agents.config import get_agent_config
 
 
 # ============================================================================
@@ -174,11 +83,13 @@ async def run_ba_analysis(
 
     # Step 4: Initialize LLM with structured output
     # Using with_structured_output guarantees valid JSON matching BAResponse schema
+    # Load temperature from agent config (single source of truth)
+    agent_config = get_agent_config("ba")
     llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+        model=agent_config.model or settings.OPENAI_MODEL,
         api_key=settings.OPENROUTER_API_KEY,
         base_url=settings.OPENAI_API_BASE,
-        temperature=0.5,  # BA persona temperature
+        temperature=agent_config.temperature,
     )
 
     # Bind structured output using Pydantic model
@@ -189,8 +100,10 @@ async def run_ba_analysis(
     )
 
     # Step 5: Prepare messages
+    # Load system prompt from config (single source of truth)
+    agent_config = get_agent_config("ba")
     messages = [
-        SystemMessage(content=BA_SYSTEM_PROMPT),
+        SystemMessage(content=agent_config.system_prompt),
         HumanMessage(content=cleaned_text),
     ]
 
