@@ -74,16 +74,16 @@ def get_agent_config(agent_name: str, config_path: Optional[str] = None) -> Agen
         "ba": all_configs.ba,
         "dev": all_configs.dev,
         "tester": all_configs.tester,
+        "manager": all_configs.manager,
     }
 
-    if agent_name.lower() in agent_map:
-        return agent_map[agent_name.lower()]
+    agent_key = agent_name.lower()
+    if agent_key in agent_map and agent_map[agent_key] is not None:
+        return agent_map[agent_key]
 
-    if agent_name.lower() == "manager" and all_configs.manager:
-        return all_configs.manager
-
+    available = [k for k, v in agent_map.items() if v is not None]
     raise ValueError(
-        f"Unknown agent: {agent_name}. Available: {list(agent_map.keys())}"
+        f"Unknown or unavailable agent: {agent_name}. Available: {available}"
     )
 
 

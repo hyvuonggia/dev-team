@@ -419,3 +419,157 @@ class Task(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     error_message: Optional[str] = Field(None, description="Error if task failed")
+
+
+# ============================================================================
+# Manager Agent Models
+# ============================================================================
+
+
+class TriageResponse(BaseModel):
+    """Response from Manager triage decision."""
+
+    needs_ba: bool = Field(..., description="Whether BA analysis is needed")
+    reasoning: str = Field(..., description="Explanation of the decision")
+    task_title: str = Field(..., description="Concise task title")
+    task_description: str = Field(..., description="Detailed task description")
+
+
+class ManagerRouteRequest(BaseModel):
+    """Request model for Manager route endpoint."""
+
+    user_request: str = Field(..., description="The user's request text")
+    project_id: Optional[str] = Field(
+        None, description="Optional project ID for workspace context"
+    )
+    context: Optional[List[str]] = Field(
+        None, description="Additional context for the request"
+    )
+
+
+class AgentCallLog(BaseModel):
+    """Log entry for an agent call."""
+
+    agent: str = Field(..., description="Agent that was called (ba/dev/tester)")
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    status: str = Field(..., description="Status: success, error, retry")
+    input_summary: str = Field(..., description="Brief summary of input")
+    output_summary: str = Field(..., description="Brief summary of output")
+    error_message: Optional[str] = Field(None, description="Error if call failed")
+
+
+class TaskResult(BaseModel):
+    """Final result from Manager routing a request.
+
+    Contains the complete output from all agent orchestration,
+    including artifacts, test plans, and next steps.
+    """
+
+    task_id: str = Field(..., description="Unique task identifier")
+    status: str = Field(
+        ...,
+        description="Final status: completed, waiting_for_clarification, failed",
+    )
+    title: str = Field(..., description="Task title")
+    description: str = Field(..., description="Task description")
+
+    # BA Analysis Results
+    ba_analysis: Optional[BAResponse] = Field(
+        None, description="BA analysis results if performed"
+    )
+    clarifying_questions: Optional[List[str]] = Field(
+        None, description="Questions if requirements need clarification"
+    )
+
+    # Dev Implementation Results
+    dev_implementation: Optional[ImplementationResult] = Field(
+        None, description="Dev implementation results if performed"
+    )
+    created_files: List[str] = Field(
+        default_factory=list, description="Files created during implementation"
+    )
+
+    # Tester Review Results
+    test_plan: Optional[TestPlan] = Field(
+        None, description="Tester test plan if performed"
+    )
+    generated_tests: List[str] = Field(
+        default_factory=list, description="Test files generated"
+    )
+
+    # Execution Metadata
+    agent_calls: List[AgentCallLog] = Field(
+        default_factory=list, description="Log of all agent calls made"
+    )
+    artifacts: List[str] = Field(
+        default_factory=list, description="All file paths produced"
+    )
+    next_steps: List[str] = Field(
+        default_factory=list, description="Recommended next actions"
+    )
+    error_message: Optional[str] = Field(None, description="Error if task failed")
+
+
+class ManagerStatusResponse(BaseModel):
+    """Response for Manager status check endpoint."""
+
+    task_id: str = Field(..., description="Task identifier")
+    status: str = Field(..., description="Current task status")
+    title: str = Field(..., description="Task title")
+    assigned_agents: List[str] = Field(
+        default_factory=list, description="Agents involved so far"
+    )
+    current_step: str = Field(..., description="Current orchestration step")
+    progress_percentage: int = Field(
+        default=0, description="Estimated completion percentage (0-100)"
+    )
+    artifacts_count: int = Field(default=0, description="Number of artifacts created")
+    created_at: datetime = Field(..., description="Task creation time")
+    updated_at: datetime = Field(..., description="Last update time")
+    error_message: Optional[str] = Field(None, description="Error if task failed")
+
+
+# ============================================================================
+# Team Workflow Models
+# ============================================================================
+
+
+class TeamChatRequest(BaseModel):
+    """Request to start a team workflow."""
+
+    message: str = Field(..., description="The user request for the team")
+    project_id: Optional[str] = Field(
+        None, description="Optional project ID for workspace context"
+    )
+    max_iterations: int = Field(
+        default=10, ge=1, le=50, description="Maximum workflow iterations"
+    )
+
+
+class TeamChatResponse(BaseModel):
+    """Response from starting a team workflow."""
+
+    task_id: str = Field(..., description="Unique task ID for tracking")
+    status: str = Field(
+        ...,
+        description="Current status: pending, in_progress, completed, failed, waiting_for_clarification",
+    )
+    message: str = Field(..., description="Status message")
+    clarifying_questions: Optional[List[str]] = Field(
+        default=None, description="Questions if requirements need clarification"
+    )
+
+
+class TeamWorkflowStatus(BaseModel):
+    """Status of a running or completed team workflow."""
+
+    task_id: str = Field(..., description="Unique task ID")
+    status: str = Field(..., description="Current status")
+    user_request: str = Field(..., description="Original user request")
+    artifacts: List[str] = Field(default_factory=list, description="Files created")
+    messages: List[dict] = Field(default_factory=list, description="Agent conversation")
+    ba_complete: bool = Field(default=False, description="BA analysis complete")
+    dev_complete: bool = Field(default=False, description="Dev implementation complete")
+    tester_complete: bool = Field(default=False, description="Tester review complete")
+    iteration_count: int = Field(default=0, description="Number of iterations")
+    error: Optional[str] = Field(None, description="Error message if failed")

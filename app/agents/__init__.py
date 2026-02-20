@@ -20,6 +20,26 @@ from app.agents.tester import (
     analyze_code_structure,
 )
 
+# LangGraph Architecture - New Supervisor Pattern
+from app.agents.manager import (
+    manager_node,
+    route_request,
+    RouteDecision,
+)
+
+from app.agents.workers import (
+    ba_node,
+    dev_node,
+    tester_node,
+    create_task_from_state,
+)
+
+from app.agents.team import (
+    build_team_graph,
+    run_team_workflow,
+    get_graph_visualization,
+)
+
 from app.agents.config import (
     AgentConfig,
     AgentsConfig,
@@ -43,6 +63,19 @@ __all__ = [
     "review_project",
     "read_source_files",
     "analyze_code_structure",
+    # LangGraph Manager (Supervisor) exports
+    "manager_node",
+    "route_request",
+    "RouteDecision",
+    # LangGraph Worker exports
+    "ba_node",
+    "dev_node",
+    "tester_node",
+    "create_task_from_state",
+    # LangGraph Team exports
+    "build_team_graph",
+    "run_team_workflow",
+    "get_graph_visualization",
     # Config exports
     "AgentConfig",
     "AgentsConfig",

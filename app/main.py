@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-from app.routers import chat, sessions, ba, dev, tester
+from app.routers import chat, sessions, ba, dev, tester, team
 from app.config import settings
 from app.db.database import create_db_and_tables
 from app.logging_config import setup_logging
@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(ba.router, prefix="/api/v1")
     app.include_router(dev.router, prefix="/api/v1")
     app.include_router(tester.router, prefix="/api/v1")
+    app.include_router(team.router, prefix="/api/v1")
 
     @app.get("/api/v1/health")
     async def health():

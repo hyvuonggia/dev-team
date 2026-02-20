@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.db.database import engine, create_db_and_tables, get_session, get_db_session
-from app.db.models import Session, Message
+from app.db.models import Session, Message, Task
 
 __all__ = [
     "engine",
@@ -10,4 +10,5 @@ __all__ = [
     "get_db_session",
     "Session",
     "Message",
+    "Task",
 ]

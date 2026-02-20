@@ -323,14 +323,56 @@ tester:
 
 ---
 
-#### 3.4 Manager Agent Persona Integration
+#### 3.4 Manager Agent Persona Integration (LangGraph Supervisor Architecture)
 
-**Goal:** Create a Manager that orchestrates BA, Dev, and Tester with clear task lifecycle management, retries, and aggregation of outputs.
+**Goal:** Create a Manager that orchestrates BA, Dev, and Tester using **LangGraph Supervisor Architecture** with dynamic routing, feedback loops, and state machine-based coordination.
 
-**What you'll learn:** orchestration patterns, state management, conditional routing, merging agent outputs.
+**What you'll learn:** LangGraph StateGraph, supervisor pattern, conditional edges, dynamic routing, hub-and-spoke topology, state accumulation, FastAPI integration.
 
-**Tasks (detailed):
-1. Persona config sample:
+**Architecture Overview:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  LangGraph Supervisor                       │
+│                                                             │
+│   START                                                     │
+│     │                                                       │
+│     ▼                                                       │
+│  ┌─────────┐      Conditional Edges      ┌─────┐          │
+│  │ Manager │ ───────────────────────────>│ BA  │          │
+│  │(Router) │                              └─┬───┘          │
+│  └────┬────┘      ┌───────────────────────│───┐           │
+│       │            │                       ▼   │           │
+│       │            │  ┌──────┐         Manager │           │
+│       │            └─>│ Dev  │──────────>│     │           │
+│       │               └──┬───┘           └─────┘           │
+│       │                  │                    ▲            │
+│       │                  ▼                    │            │
+│       │               ┌──────┐                │            │
+│       └──────────────>│Tester│────────────────┘            │
+│                       └──┬───┘                             │
+│                          │                                  │
+│                          ▼                                  │
+│                         END                                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Concepts:**
+- **Manager Node (Supervisor):** Uses LLM with structured output to dynamically decide `next_agent` at each step
+- **Worker Nodes (BA/Dev/Tester):** Perform work, update state, always return to Manager
+- **Conditional Edges:** Route based on Manager's `next_agent` decision
+- **State Accumulation:** Messages, artifacts, and results accumulate across iterations
+- **Feedback Loops:** Tester finds bug → Manager routes back to Dev to fix it
+- **FastAPI Integration:** HTTP endpoints to trigger and monitor workflows
+
+**Tasks (detailed):**
+
+1. Install and configure LangGraph (`requirements.txt`):
+```
+langgraph>=0.1.0
+```
+
+2. Persona config sample (`agent_config.yaml`):
 
 ```yaml
 manager:
@@ -339,93 +381,259 @@ manager:
   model: "nvidia/nemotron-3-nano-30b-a3b:free"
   temperature: 0.3
   system_prompt: |
-    You are Manager. Receive a user request, decide if BA/Dev/Tester are needed, create tasks with
-    clear acceptance criteria, and coordinate agent calls. Keep task state and produce a final
-    synthesized response that includes artifacts and next steps.
+    You are the Project Manager supervising a team of AI agents: Business Analyst (BA), 
+    Developer (Dev), and Tester. Your job is to analyze the current state of the project 
+    and decide which agent should act next.
+    
+    Routing Rules:
+    - 'ba': If requirements are missing, vague, or need clarification
+    - 'dev': If requirements are clear but code needs to be written or fixed
+    - 'tester': If code has been written and needs QA/review
+    - 'FINISH': If the user request is fully implemented and tested
+    
+    Output: {"next_agent": "ba|dev|tester|FINISH", "reasoning": "explanation"}
 ```
 
-2. Implement manager logic in `app/agents/manager.py`:
-- Main function: `route_request(user_request) -> TaskResult`
-  - Step A: Triage (is this a small ask the Dev can implement directly, or does it need BA?)
-  - Step B: Create Task(s) with unique IDs and status `pending`
-  - Step C: Call BA if requirements unclear; wait for `clarify` or `done`
-  - Step D: Call Dev with analyzed requirements or plan; validate plan
-  - Step E: Send Dev artifacts to Tester for review
-  - Step F: Aggregate outputs, update Task `completed` and store artifacts
-
-3. State & persistence:
-- Task model should be persisted (SQLite) with fields: id, status, assigned_agents, artifacts, agent_messages, timestamps
-- Manager should write audit logs of every agent call including LLM prompts, responses, and retrieved context pointers
-
-4. Tooling & retries:
-- Manager uses retriever to fetch relevant project context before calling agents
-- Implement retry/backoff for failing agent calls and a `max_retries` policy
-
-5. Example orchestration pseudocode:
+3. Define State (`app/models/state.py`):
 
 ```python
-def route_request(request):
-    task = create_task(request)
-    if needs_ba(request):
-        ba_resp = BA.run(request)
-        if ba_resp.questions:
-            task.status = 'waiting_for_clarification'
-            return ba_resp.questions
-        requirements = ba_resp.user_stories
-    else:
-        requirements = synth_requirements(request)
+from typing import TypedDict, Annotated, Sequence, List, Optional
+import operator
+from langchain_core.messages import BaseMessage
 
-    dev_plan = Dev.generate(requirements)
-    write_files(dev_plan.files)
-    test_plan = Tester.review_and_generate_tests(dev_plan.artifacts)
-    task.complete(dev_plan, test_plan)
-    return compile_final_response(task)
+class TeamState(TypedDict):
+    user_request: str
+    project_id: Optional[str]
+    messages: Annotated[Sequence[BaseMessage], operator.add]
+    next_agent: str  # "ba", "dev", "tester", "FINISH"
+    task: Optional[Task]
+    ba_result: Optional[BAResponse]
+    dev_result: Optional[ImplementationResult]
+    tester_result: Optional[TestPlan]
+    artifacts: List[str]
+    status: str
+    iteration_count: int
+    max_iterations: int
 ```
 
-6. Endpoints: `/api/v1/manager/route` — accepts a user request, returns a `task_id` and immediate status; use `/api/v1/team/status/{task_id}` to poll for completion or stream events via SSE.
+4. Implement Manager Node (`app/agents/manager.py`):
 
-7. Acceptance criteria and observability:
-- Manager must always return a task with traceable agent outputs
-- All intermediate artifacts and agent messages stored and queryable via task endpoints
-- Provide an event log for streaming clients (tool calls, tool results, tokens)
+```python
+from pydantic import BaseModel
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-8. Tests and failure modes:
-- Simulate failing Dev outputs and ensure Manager retries/is able to request fixes from Dev
-- Ensure Manager safely aborts if required external resources (vector DB, DB) are unavailable and returns clear error messages
+class RouteDecision(BaseModel):
+    next_agent: Literal["ba", "dev", "tester", "FINISH"]
+    reasoning: str
 
+async def manager_node(state: TeamState) -> dict:
+    llm = ChatOpenAI(model="...", temperature=0)
+    agent_config = get_agent_config("manager")
+    
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", agent_config.system_prompt),  # Loaded from config!
+        MessagesPlaceholder(variable_name="messages"),
+        ("system", f"Current state: {format_state(state)}\nWho should act next?"),
+    ])
+    
+    structured_llm = llm.with_structured_output(RouteDecision)
+    decision = await structured_llm.ainvoke({"messages": state["messages"]})
+    
+    return {
+        "messages": [AIMessage(content=f"Routing to {decision.next_agent}")],
+        "next_agent": decision.next_agent,
+        "iteration_count": state["iteration_count"] + 1,
+    }
+```
 
-### Multi-Agent Orchestration with LangGraph
+5. Implement Worker Nodes (`app/agents/workers.py`):
 
-**Goal:** Implement the full LangGraph-based orchestration of the agent team.
+```python
+async def ba_node(state: TeamState) -> dict:
+    result = await run_ba_analysis(state["user_request"], state.get("project_id"))
+    return {
+        "messages": [AIMessage(content="BA analysis complete", name="BA")],
+        "ba_result": result.get("response"),
+        "next_agent": "manager",  # Always return to manager
+    }
 
-**What you'll learn:** State machines, agent coordination, LangGraph fundamentals.
+async def dev_node(state: TeamState) -> dict:
+    result = await generate_implementation(state["task"])
+    return {
+        "messages": [AIMessage(content="Dev implementation complete", name="Dev")],
+        "dev_result": result,
+        "artifacts": result.created_files,
+        "next_agent": "manager",
+    }
 
-**Tasks:**
-1. Install and configure LangGraph
-2. Define `TeamState` structure for shared context
-3. Build state graph where:
-   - User request enters
-   - Manager node analyzes request
-   - Routes to appropriate specialist nodes (BA, Dev, Tester)
-   - Agents operate using their specialized logic and tools
-   - Manager node collects results and synthesizes final response
-4. Implement conditional edges for routing decisions
-5. Add status tracking across the workflow
-6. Integrate with FastAPI endpoints for team interaction
-7. Add input validation for multi-agent requests
+async def tester_node(state: TeamState) -> dict:
+    result = await review_and_generate_tests(state["artifacts"])
+    return {
+        "messages": [AIMessage(content="Tester review complete", name="Tester")],
+        "tester_result": result,
+        "next_agent": "manager",
+    }
+```
 
-**Project Structure Update:**
-- Enhanced `app/agents/team.py` with LangGraph configuration
-- New state definitions in `app/models/state.py`
+6. Build StateGraph (`app/agents/team.py`):
 
-**API Endpoints:**
-- (Existing endpoints updated to use orchestrated flow)
+```python
+from langgraph.graph import StateGraph, START, END
+
+def build_team_graph():
+    workflow = StateGraph(TeamState)
+    
+    # Add nodes
+    workflow.add_node("manager", manager_node)
+    workflow.add_node("ba", ba_node)
+    workflow.add_node("dev", dev_node)
+    workflow.add_node("tester", tester_node)
+    
+    # Workers always report back to Manager
+    workflow.add_edge("ba", "manager")
+    workflow.add_edge("dev", "manager")
+    workflow.add_edge("tester", "manager")
+    
+    # Manager uses conditional edges to route
+    workflow.add_conditional_edges(
+        "manager",
+        lambda state: state["next_agent"],
+        {
+            "ba": "ba",
+            "dev": "dev",
+            "tester": "tester",
+            "FINISH": END,
+        }
+    )
+    
+    workflow.add_edge(START, "manager")
+    
+    return workflow.compile()
+```
+
+7. FastAPI Endpoints (`app/routers/team.py`):
+
+```python
+from fastapi import APIRouter, BackgroundTasks
+
+router = APIRouter(prefix="/team", tags=["team"])
+
+@router.post("/chat")
+async def team_chat(request: TeamChatRequest):
+    '''Start a synchronous team workflow'''
+    final_state = await run_team_workflow(
+        user_request=request.message,
+        project_id=request.project_id,
+        max_iterations=request.max_iterations,
+    )
+    return {
+        "task_id": task_id,
+        "status": final_state["status"],
+        "artifacts": final_state["artifacts"],
+    }
+
+@router.post("/chat/async")
+async def team_chat_async(request: TeamChatRequest, background: BackgroundTasks):
+    '''Start an async team workflow (returns immediately)'''
+    task_id = generate_task_id()
+    background.add_task(run_workflow, task_id, request)
+    return {"task_id": task_id, "status": "pending"}
+
+@router.get("/status/{task_id}")
+async def get_team_status(task_id: str):
+    '''Poll for workflow status and results'''
+    workflow = get_workflow(task_id)
+    return {
+        "task_id": task_id,
+        "status": workflow["status"],
+        "artifacts": workflow["state"]["artifacts"],
+        "ba_complete": workflow["state"]["ba_result"] is not None,
+        "dev_complete": workflow["state"]["dev_result"] is not None,
+        "tester_complete": workflow["state"]["tester_result"] is not None,
+    }
+
+@router.get("/status/{task_id}/artifacts")
+async def get_team_artifacts(task_id: str):
+    '''Get artifacts produced by the workflow'''
+    return {"artifacts": get_workflow(task_id)["state"]["artifacts"]}
+```
+
+8. Register Router (`app/main.py`):
+
+```python
+from app.routers import chat, sessions, ba, dev, tester, team
+
+def create_app():
+    app = FastAPI(...)
+    app.include_router(team.router, prefix="/api/v1")
+    return app
+```
+
+**Usage Example:**
+
+```python
+from app.agents.team import build_team_graph
+from langchain_core.messages import HumanMessage
+
+# Initialize state
+initial_state = {
+    "user_request": "Build a user authentication system",
+    "messages": [HumanMessage(content="Build a user authentication system")],
+    "next_agent": "manager",
+    "artifacts": [],
+    "iteration_count": 0,
+    "max_iterations": 10,
+}
+
+# Run the graph
+graph = build_team_graph()
+final_state = await graph.ainvoke(initial_state)
+
+# Results available in final_state
+print(final_state["artifacts"])  # All created files
+print(final_state["messages"])   # Full conversation history
+```
+
+**Key Differences from Procedural Pipeline:**
+
+| Feature | Procedural Pipeline | LangGraph Supervisor |
+|---------|-------------------|---------------------|
+| Flow Control | Hardcoded sequence | Dynamic LLM routing |
+| Iteration | No loops allowed | Natural feedback loops (Tester→Dev) |
+| State | Passed manually | Accumulated in shared state |
+| Extensibility | Hard to add agents | Easy to add new nodes |
+| Debugging | Trace through code | Visualize graph execution |
+| API | Manual implementation | FastAPI router included |
 
 **Acceptance Criteria:**
-- [ ] Full end-to-end workflow from user request to synthesized response
-- [ ] Each agent operates autonomously but coordinated by Manager
-- [ ] State is maintained throughout the workflow
-- [ ] All agent contributions are visible in final output
+- [x] Install and configure LangGraph (langgraph>=0.1.0)
+- [x] Define `TeamState` structure for shared context with annotated messages
+- [x] Build state graph with Manager node, worker nodes, and conditional edges
+- [x] Manager node analyzes request and routes to appropriate specialist nodes
+- [x] Agents operate using their specialized logic and tools
+- [x] Manager node collects results and synthesizes final response
+- [x] Implement conditional edges for routing decisions based on LLM output
+- [x] Add status tracking across the workflow (iteration_count, status fields)
+- [x] Integrate with FastAPI endpoints for team interaction (`/team/chat`, `/team/status/{id}`)
+- [x] Add input validation for multi-agent requests (Pydantic models)
+- [x] Full end-to-end workflow from user request to synthesized response
+- [x] Each agent operates autonomously but coordinated by Manager
+- [x] State is maintained throughout the workflow
+- [x] All agent contributions are visible in final output
+- [ ] Workers always return control to Manager after completing work
+- [ ] Graph supports iteration (e.g., Tester finds bug → Dev fixes it)
+- [ ] Loop prevention via max_iterations in state
+- [ ] Fallback routing when LLM is unavailable
+
+**Tests:**
+- Test Manager routes to BA when no requirements exist
+- Test Manager routes to Dev when BA complete
+- Test Manager routes to Tester when code exists
+- Test Manager routes back to Dev when Tester finds issues
+- Test Manager finishes when all work complete
+- Test loop prevention after max_iterations
+- Test FastAPI endpoints return correct status codes
+- Test async workflow completes in background
 
 ---
 
@@ -526,66 +734,62 @@ data: {"session_id": "...", "total_tokens": 150}
 
 ---
 
-### Step 6: Multi-Agent System — Manager Orchestration with LangGraph
+### Step 6: Workflow Persistence & State Management
 
-**Goal:** Implement the Manager agent that orchestrates BA, Dev, and Tester using LangGraph.
+**Goal:** Persist workflow state, track execution history, and enable workflow recovery and replay.
 
-**What you'll learn:** LangGraph, multi-agent orchestration, state machines, agent delegation.
+**What you'll learn:** State persistence patterns, workflow snapshots, execution replay, database integration with LangGraph.
 
 **Tasks:**
 
-1. Install and configure LangGraph
-2. Define the team state graph:
-   ```
-   User Request → Manager → [Routes to appropriate agent(s)]
-                              ├── BA (if requirements/analysis needed)
-                              ├── Dev (if coding needed)
-                              └── Tester (if testing needed)
-                          → Manager reviews → Response to User
-   ```
-3. Implement `TeamState` (shared state across agents):
-   ```python
-   class TeamState(TypedDict):
-       messages: list          # Conversation history
-       current_task: str       # Current task description
-       assigned_to: str        # Which agent is working
-       artifacts: dict         # Files created, docs written, etc.
-       status: str             # planning, in_progress, review, done
-   ```
-4. Build the LangGraph state graph with conditional routing
-5. Manager decides which agent to invoke based on the user's request
-6. Each agent's output feeds back to Manager for review
-7. Manager can iterate (e.g., send Dev's code to Tester for review)
+1. **Persist TeamState to Database**
+   - Create `WorkflowExecution` database model
+   - Store state snapshots at each graph node transition
+   - Track iteration count, agent completions, and artifacts
 
-**Project Structure Update:**
+2. **Workflow Recovery**
+   - Save intermediate states for long-running workflows
+   - Enable resumption from last checkpoint on server restart
+   - Handle graceful shutdowns and recoveries
 
-```
-app/
-├── agents/
-│   ├── manager.py          # Manager orchestration logic
-│   ├── ba.py               # BA agent
-│   ├── developer.py        # Developer agent
-│   ├── tester.py           # Tester agent
-│   └── team.py             # LangGraph team graph definition
-├── models/
-│   └── state.py            # TeamState and related models
+3. **Execution History & Replay**
+   - Store complete execution history for audit trails
+   - Enable replay of workflows for debugging
+   - Export/import workflow states
+
+4. **Performance Optimization**
+   - Implement state compression for large messages
+   - Prune old history to manage database size
+   - Add pagination for workflow history queries
+
+**Database Schema:**
+
+```python
+class WorkflowExecution(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    task_id: str = Field(index=True)
+    user_request: str
+    status: str  # pending, running, completed, failed
+    current_state: dict  # Serialized TeamState
+    checkpoint_data: dict  # For resumption
+    created_at: datetime
+    updated_at: datetime
+    completed_at: Optional[datetime]
 ```
 
-**API Endpoints (updated):**
+**API Endpoints:**
 
-- `POST /api/v1/team/chat` — Send a request to the full dev team
-- `POST /api/v1/team/chat/stream` — Streaming version
-- `GET /api/v1/team/status/{task_id}` — Check team task status
+- `GET /api/v1/workflows` — List all workflow executions
+- `GET /api/v1/workflows/{task_id}/history` — Get state history
+- `POST /api/v1/workflows/{task_id}/resume` — Resume from checkpoint
+- `DELETE /api/v1/workflows/{task_id}` — Clean up old workflows
 
 **Acceptance Criteria:**
-
-- [ ] User sends a request like "Build a REST API for user management"
-- [ ] Manager analyzes and routes to BA for requirements
-- [ ] BA produces user stories, Manager sends to Dev
-- [ ] Dev writes code, Manager sends to Tester
-- [ ] Tester reviews code and writes test cases
-- [ ] Manager compiles final response
-- [ ] Each agent's contribution is visible in the response
+- [ ] Workflow state persisted to database at each node transition
+- [ ] Can resume long-running workflows after server restart
+- [ ] Complete audit trail of all agent decisions and outputs
+- [ ] Can replay workflow execution step-by-step for debugging
+- [ ] Old workflow data automatically pruned based on retention policy
 
 ---
 
@@ -934,9 +1138,12 @@ dev-team/
 | GET | `/api/v1/projects` | 4 | List projects |
 | GET | `/api/v1/projects/{id}/files` | 4 | List project files |
 | GET | `/api/v1/projects/{id}/files/{path}` | 4 | Read a file |
-| POST | `/api/v1/team/chat` | 6 | Chat with full dev team |
-| POST | `/api/v1/team/chat/stream` | 6 | Streaming team chat |
-| GET | `/api/v1/team/status/{task_id}` | 6 | Check team task status |
+| POST | `/api/v1/team/chat` | 3 | Chat with full dev team |
+| POST | `/api/v1/team/chat/stream` | 3 | Streaming team chat |
+| GET | `/api/v1/team/status/{task_id}` | 3 | Check team task status |
+| GET | `/api/v1/workflows` | 6 | List workflow executions |
+| GET | `/api/v1/workflows/{task_id}/history` | 6 | Get workflow state history |
+| POST | `/api/v1/workflows/{task_id}/resume` | 6 | Resume workflow from checkpoint |
 | GET | `/api/v1/tasks` | 7 | List tasks |
 | GET | `/api/v1/tasks/{id}` | 7 | Task details |
 | GET | `/api/v1/tasks/{id}/artifacts` | 7 | Task artifacts |
@@ -955,10 +1162,10 @@ dev-team/
 |---|---|---|
 | 1 | Simple chatbot API | LangChain + OpenRouter + FastAPI basics |
 | 2 | Conversational memory | Session management, message history |
-| 3 | Role-based personas | System prompts, prompt engineering |
+| 3 | Role-based personas + LangGraph Supervisor | System prompts, prompt engineering, LangGraph orchestration |
 | 4 | File system tools | LangChain tools, function calling, agents |
 | 5 | Streaming responses | SSE, async streaming |
-| 6 | Multi-agent team | LangGraph, orchestration, state machines |
+| 6 | Workflow persistence & state management | State snapshots, execution replay, checkpoint recovery |
 | 7 | Task tracking | Workflow state, audit trails |
 | 8 | Database persistence | SQLite, SQLModel, migrations |
 | 9 | Per-agent models | Model routing, cost optimization |
