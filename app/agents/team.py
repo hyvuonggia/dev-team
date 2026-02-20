@@ -167,6 +167,7 @@ async def run_team_workflow(
         "artifacts": [],
         "status": "pending",
         "clarifying_questions": [],
+        "final_response": None,
         "error_message": None,
         "iteration_count": 0,
         "max_iterations": max_iterations,

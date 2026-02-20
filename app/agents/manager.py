@@ -103,35 +103,42 @@ async def manager_node(state: TeamState) -> dict:
         logger.warning(
             f"⚠️  MANAGER: Reached maximum iterations ({max_iterations}). Forcing completion."
         )
+        final_response = await _generate_final_response(state)
         return {
             "messages": [
                 AIMessage(
-                    content=f"Manager: Reached maximum iterations ({max_iterations}). Ending workflow.",
+                    content=final_response,
                     name="Manager",
                 )
             ],
             "next_agent": "FINISH",
             "status": "completed",
+            "final_response": final_response,
         }
 
     # Check if already failed
     if state.get("status") == "failed":
         logger.error(f"❌ MANAGER: Workflow failed, routing to FINISH")
+        final_response = await _generate_final_response(state)
         return {
             "next_agent": "FINISH",
+            "status": "completed",
+            "final_response": final_response,
         }
 
     # Check if waiting for clarification
     if state.get("status") == "waiting_for_clarification":
         logger.info(f"⏸️  MANAGER: Waiting for user clarification, routing to FINISH")
+        final_response = await _generate_final_response(state)
         return {
             "messages": [
                 AIMessage(
-                    content="Manager: Waiting for user clarification. Cannot proceed.",
+                    content=final_response,
                     name="Manager",
                 )
             ],
             "next_agent": "FINISH",
+            "final_response": final_response,
         }
 
     # Get API key
@@ -180,6 +187,23 @@ async def manager_node(state: TeamState) -> dict:
 
         # Update iteration count
         new_iteration_count = iteration_count + 1
+
+        # If routing to FINISH, generate final response
+        if decision.next_agent == "FINISH":
+            logger.info(f"🎯 MANAGER: Generating final response...")
+            final_response = await _generate_final_response(state)
+            return {
+                "messages": [
+                    AIMessage(
+                        content=final_response,
+                        name="Manager",
+                    )
+                ],
+                "next_agent": "FINISH",
+                "status": "completed",
+                "final_response": final_response,
+                "iteration_count": new_iteration_count,
+            }
 
         return {
             "messages": [
@@ -270,6 +294,140 @@ def _format_state_summary(state: TeamState) -> str:
     return result
 
 
+async def _generate_final_response(state: TeamState) -> str:
+    """
+    Generate a natural language final response when workflow completes.
+
+    This is called when the Manager routes to FINISH to synthesize
+    a human-readable response summarizing what was accomplished.
+
+    Args:
+        state: Current TeamState with all agent results
+
+    Returns:
+        Natural language response string
+    """
+    # Check if we need clarification
+    if state.get("status") == "waiting_for_clarification":
+        questions = state.get("clarifying_questions", [])
+        if questions:
+            q_list = "\n".join([f"{i + 1}. {q}" for i, q in enumerate(questions)])
+            return f"I need some clarification to proceed:\n\n{q_list}"
+
+    # Check for errors
+    if state.get("status") == "failed":
+        error = state.get("error_message", "Unknown error")
+        return f"Something went wrong: {error}"
+
+    # Build context for the LLM
+    context_parts = []
+
+    # User request
+    user_request = state.get("user_request", "")
+    context_parts.append(f"User Request: {user_request}")
+
+    # BA results
+    ba_result = state.get("ba_result")
+    if ba_result:
+        title = getattr(ba_result, "title", "Analysis complete")
+        context_parts.append(f"\nBusiness Analysis: {title}")
+        if hasattr(ba_result, "user_stories") and ba_result.user_stories:
+            stories = "\n".join([f"- {s}" for s in ba_result.user_stories[:3]])
+            context_parts.append(f"User Stories:\n{stories}")
+
+    # Dev results
+    dev_result = state.get("dev_result")
+    if dev_result and dev_result.success:
+        files = getattr(dev_result, "created_files", [])
+        if files:
+            file_list = "\n".join([f"- {f}" for f in files[:5]])
+            context_parts.append(f"\nFiles Created:\n{file_list}")
+            if len(files) > 5:
+                context_parts.append(f"  ... and {len(files) - 5} more files")
+
+    # Tester results
+    tester_result = state.get("tester_result")
+    if tester_result and getattr(tester_result, "tests", None):
+        context_parts.append("\nTesting: Test plan generated")
+
+    # Artifacts
+    artifacts = state.get("artifacts", [])
+    if artifacts:
+        context_parts.append(f"\nTotal artifacts: {len(artifacts)}")
+
+    context = "\n".join(context_parts)
+
+    # Try to get API key for LLM
+    if not settings.OPENROUTER_API_KEY:
+        # Fallback to simple response
+        return _build_simple_response(state)
+
+    try:
+        # Use the same model as the Manager
+        agent_config = get_agent_config("manager")
+        llm = ChatOpenAI(
+            model=agent_config.model or settings.OPENAI_MODEL,
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url=settings.OPENAI_API_BASE,
+            temperature=0.7,
+        )
+
+        prompt = f"""You are a helpful project manager summarizing the results of a multi-agent workflow.
+
+Here's what happened during the workflow:
+
+{context}
+
+Please provide a friendly, natural language summary of what was accomplished. 
+Include what was done, any files created, and what the next steps might be.
+Keep it concise but informative. Don't use markdown formatting - just write as if you're explaining to someone what happened."""
+
+        response = await llm.ainvoke([HumanMessage(content=prompt)])
+        return response.content
+
+    except Exception as e:
+        logger.warning(f"⚠️  MANAGER: Failed to generate LLM response: {e}")
+        return _build_simple_response(state)
+
+
+def _build_simple_response(state: TeamState) -> str:
+    """Build a simple response without LLM."""
+    parts = []
+
+    status = state.get("status", "unknown")
+
+    if status == "waiting_for_clarification":
+        questions = state.get("clarifying_questions", [])
+        if questions:
+            parts.append("I need some clarification to proceed:\n")
+            for i, q in enumerate(questions, 1):
+                parts.append(f"{i}. {q}")
+            return "\n".join(parts)
+
+    if status == "failed":
+        return f"Something went wrong: {state.get('error_message', 'Unknown error')}"
+
+    ba_result = state.get("ba_result")
+    if ba_result:
+        parts.append("Business analysis complete.")
+
+    dev_result = state.get("dev_result")
+    if dev_result and dev_result.success:
+        files = getattr(dev_result, "created_files", [])
+        if files:
+            parts.append(f"Created {len(files)} file(s).")
+
+    tester_result = state.get("tester_result")
+    if tester_result and getattr(tester_result, "tests", None):
+        parts.append("Testing complete.")
+
+    artifacts = state.get("artifacts", [])
+    if artifacts:
+        parts.append(f"Total: {len(artifacts)} artifacts created.")
+
+    return " ".join(parts) if parts else "Workflow completed."
+
+
 def _fallback_routing(state: TeamState, error: str | None = None) -> dict:
     """
     Fallback routing logic when LLM is unavailable.
@@ -309,6 +467,22 @@ def _fallback_routing(state: TeamState, error: str | None = None) -> dict:
         reasoning += f" (Note: LLM routing failed: {error})"
 
     iteration_count = state.get("iteration_count", 0)
+
+    # If routing to FINISH, generate final response using simple builder
+    if next_agent == "FINISH":
+        final_response = _build_simple_response(state)
+        return {
+            "messages": [
+                AIMessage(
+                    content=final_response,
+                    name="Manager",
+                )
+            ],
+            "next_agent": "FINISH",
+            "status": "completed",
+            "final_response": final_response,
+            "iteration_count": iteration_count + 1,
+        }
 
     return {
         "messages": [

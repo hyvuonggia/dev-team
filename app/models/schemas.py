@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 
 
@@ -106,6 +106,15 @@ class GeneratedFile(BaseModel):
 
     path: str = Field(..., description="Relative path to the file")
     content: str = Field(..., description="File content")
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def unescape_newlines(cls, v: str) -> str:
+        """Unescape literal \\n sequences to actual newlines."""
+        if isinstance(v, str):
+            # Handle escaped newlines: \\n -> \n -> actual newline
+            return v.replace("\\n", "\n")
+        return v
 
 
 class DevRequest(BaseModel):
@@ -554,10 +563,7 @@ class TeamChatResponse(BaseModel):
         ...,
         description="Current status: pending, in_progress, completed, failed, waiting_for_clarification",
     )
-    message: str = Field(..., description="Status message")
-    clarifying_questions: Optional[List[str]] = Field(
-        default=None, description="Questions if requirements need clarification"
-    )
+    message: str = Field(..., description="AI response message")
 
 
 class TeamWorkflowStatus(BaseModel):

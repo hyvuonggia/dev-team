@@ -84,8 +84,7 @@ async def team_chat(request: TeamChatRequest) -> TeamChatResponse:
         return TeamChatResponse(
             task_id=task_id,
             status=final_state.get("status", "completed"),
-            message=f"Workflow completed with {len(final_state.get('artifacts', []))} artifacts",
-            clarifying_questions=final_state.get("clarifying_questions"),
+            message=final_state.get("final_response") or "Workflow completed.",
         )
 
     except Exception as e:
@@ -99,7 +98,6 @@ async def team_chat(request: TeamChatRequest) -> TeamChatResponse:
             task_id=task_id,
             status="failed",
             message=f"Workflow failed: {str(e)}",
-            clarifying_questions=None,
         )
 
 

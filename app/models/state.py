@@ -89,6 +89,9 @@ class TeamState(TypedDict):
     clarifying_questions: List[str]
     """Questions from BA if requirements need clarification."""
 
+    final_response: Optional[str]
+    """Final natural language response from Manager when workflow completes."""
+
     error_message: Optional[str]
     """Error message if workflow failed."""
 
