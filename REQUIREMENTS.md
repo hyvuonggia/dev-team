@@ -25,7 +25,7 @@ Build a multi-agent AI development team consisting of a **Manager**, **Business 
 
 ---
 
-### Step 1: Project Setup & Simple Chatbot
+### Step 1: Project Setup & Simple Chatbot ✅ COMPLETE
 
 **Goal:** Get a basic chatbot working with OpenRouter via LangChain.
 
@@ -72,13 +72,13 @@ llm = ChatOpenAI(
 
 **Acceptance Criteria:**
 
-- [ ] Can send a message and receive an LLM response via API
-- [ ] OpenRouter API key loaded from `.env`
-- [ ] Swagger docs available at `/docs`
+- [x] Can send a message and receive an LLM response via API
+- [x] OpenRouter API key loaded from `.env`
+- [x] Swagger docs available at `/docs`
 
 ---
 
-### Step 2: Add Conversation Memory
+### Step 2: Add Conversation Memory ✅ COMPLETE
 
 **Goal:** The chatbot remembers previous messages within a session, persisted to SQLite.
 
@@ -128,15 +128,15 @@ history = SQLChatMessageHistory(
 
 **Acceptance Criteria:**
 
-- [ ] Sending messages with the same `session_id` retains conversation context
-- [ ] New session created automatically if no `session_id` provided
-- [ ] Can retrieve full conversation history for a session
-- [ ] Conversation history persists after server restart (SQLite)
-- [ ] Sessions and messages are stored in relational database tables
+- [x] Sending messages with the same `session_id` retains conversation context
+- [x] New session created automatically if no `session_id` provided
+- [x] Can retrieve full conversation history for a session
+- [x] Conversation history persists after server restart (SQLite)
+- [x] Sessions and messages are stored in relational database tables
 
 ---
 
-### Step 3: Role-Based Agent Personas
+### Step 3: Role-Based Agent Personas ✅ COMPLETE
 
 **Goal:** Create specialized agent personas (BA, Dev, Tester, Manager) with distinct roles, system prompts, and responsibilities.
 
@@ -620,9 +620,9 @@ print(final_state["messages"])   # Full conversation history
 - [x] Each agent operates autonomously but coordinated by Manager
 - [x] State is maintained throughout the workflow
 - [x] All agent contributions are visible in final output
-- [ ] Workers always return control to Manager after completing work
-- [ ] Graph supports iteration (e.g., Tester finds bug → Dev fixes it)
-- [ ] Loop prevention via max_iterations in state
+- [x] Workers always return control to Manager after completing work
+- [x] Graph supports iteration (e.g., Tester finds bug → Dev fixes it)
+- [x] Loop prevention via max_iterations in state
 - [ ] Fallback routing when LLM is unavailable
 
 **Tests:**
@@ -637,7 +637,7 @@ print(final_state["messages"])   # Full conversation history
 
 ---
 
-### Step 4: Add Tools — File System Operations
+### Step 4: Add Tools — File System Operations ✅ COMPLETE
 
 **Goal:** Give agents the ability to read and write files in a designated workspace directory.
 
@@ -684,15 +684,15 @@ app/
 
 **Acceptance Criteria:**
 
-- [ ] Dev agent can write code files when asked
-- [ ] Tester agent can read code and write test files
-- [ ] BA agent can write requirements/user story documents
-- [ ] All file operations sandboxed to workspace directory
-- [ ] File operations visible in API responses (tool call traces)
+- [x] Dev agent can write code files when asked
+- [x] Tester agent can read code and write test files
+- [x] BA agent can write requirements/user story documents
+- [x] All file operations sandboxed to workspace directory
+- [x] File operations visible in API responses (tool call traces)
 
 ---
 
-### Step 5: Streaming Responses
+### Step 5: Streaming Responses ⚠️ PARTIAL
 
 **Goal:** Stream agent responses token-by-token via Server-Sent Events (SSE).
 
@@ -734,7 +734,7 @@ data: {"session_id": "...", "total_tokens": 150}
 
 ---
 
-### Step 6: Workflow Persistence & State Management
+### Step 6: Workflow Persistence & State Management ⚠️ PARTIAL
 
 **Goal:** Persist workflow state, track execution history, and enable workflow recovery and replay.
 
@@ -793,7 +793,7 @@ class WorkflowExecution(SQLModel, table=True):
 
 ---
 
-### Step 7: Task Tracking & Workflow State
+### Step 7: Task Tracking & Workflow State ⚠️ PARTIAL
 
 **Goal:** Track tasks, their status, and the workflow through the agent pipeline.
 
@@ -833,7 +833,7 @@ class WorkflowExecution(SQLModel, table=True):
 
 ---
 
-### Step 8: Add Persistence with SQLite
+### Step 8: Add Persistence with SQLite ✅ COMPLETE
 
 **Goal:** Persist conversations, tasks, and project data to SQLite.
 
@@ -864,13 +864,13 @@ app/
 
 **Acceptance Criteria:**
 
-- [ ] Application data survives restarts
-- [ ] Conversation history persisted and retrievable
-- [ ] Task history with full agent interactions stored
+- [x] Application data survives restarts
+- [x] Conversation history persisted and retrievable
+- [x] Task history with full agent interactions stored
 
 ---
 
-### Step 9: Per-Agent Model Configuration
+### Step 9: Per-Agent Model Configuration ✅ COMPLETE
 
 **Goal:** Allow different LLM models for different agent roles.
 
@@ -906,13 +906,13 @@ app/
 
 **Acceptance Criteria:**
 
-- [ ] Each agent can use a different model
-- [ ] Model configs changeable at runtime via API
-- [ ] Token usage tracked per agent
+- [x] Each agent can use a different model
+- [x] Model configs changeable at runtime via API
+- [x] Token usage tracked per agent
 
 ---
 
-### Step 10: Feature-Level Multi-File Projects
+### Step 10: Feature-Level Multi-File Projects ❌ NOT STARTED
 
 **Goal:** Agents can work on multi-file features with full project context.
 
@@ -958,7 +958,7 @@ app/
 
 ---
 
-### Step 11: Error Handling, Logging & Observability
+### Step 11: Error Handling, Logging & Observability ✅ COMPLETE
 
 **Goal:** Production-ready error handling, structured logging, and LLM call tracing.
 
@@ -976,10 +976,10 @@ app/
 
 **Acceptance Criteria:**
 
-- [ ] All errors return consistent JSON error responses
-- [ ] Every request traceable end-to-end
-- [ ] LLM calls visible in tracing dashboard
-- [ ] Graceful handling of API failures
+- [x] All errors return consistent JSON error responses
+- [x] Every request traceable end-to-end
+- [x] LLM calls visible in tracing dashboard
+- [x] Graceful handling of API failures
 
 ---
 
@@ -1011,7 +1011,7 @@ These requirements capture high-priority safety, validation, and operational con
 3. Add a short section in `REQUIREMENTS.md` (this file) describing audit log retention and redaction rules and wire those rules into the Manager's audit logging design.
 
 
-### Step 12: Authentication & Multi-Tenancy
+### Step 12: Authentication & Multi-Tenancy ❌ NOT STARTED
 
 **Goal:** Add API authentication and support for multiple users.
 
@@ -1158,17 +1158,17 @@ dev-team/
 
 ## Learning Progression Summary
 
-| Step | What You Build | Key Learning |
-|---|---|---|
-| 1 | Simple chatbot API | LangChain + OpenRouter + FastAPI basics |
-| 2 | Conversational memory | Session management, message history |
-| 3 | Role-based personas + LangGraph Supervisor | System prompts, prompt engineering, LangGraph orchestration |
-| 4 | File system tools | LangChain tools, function calling, agents |
-| 5 | Streaming responses | SSE, async streaming |
-| 6 | Workflow persistence & state management | State snapshots, execution replay, checkpoint recovery |
-| 7 | Task tracking | Workflow state, audit trails |
-| 8 | Database persistence | SQLite, SQLModel, migrations |
-| 9 | Per-agent models | Model routing, cost optimization |
-| 10 | Multi-file features | Context management, project analysis |
-| 11 | Observability | Logging, tracing, error handling |
-| 12 | Auth & multi-tenancy | Security, user isolation |
+| Step | What You Build | Status | Key Learning |
+|---|---|---|---|
+| 1 | Simple chatbot API | ✅ Complete | LangChain + OpenRouter + FastAPI basics |
+| 2 | Conversational memory | ✅ Complete | Session management, message history |
+| 3 | Role-based personas + LangGraph Supervisor | ✅ Complete | System prompts, prompt engineering, LangGraph orchestration |
+| 4 | File system tools | ✅ Complete | LangChain tools, function calling, agents |
+| 5 | Streaming responses | ⚠️ Partial | SSE, async streaming |
+| 6 | Workflow persistence & state management | ⚠️ Partial | State snapshots, execution replay, checkpoint recovery |
+| 7 | Task tracking | ⚠️ Partial | Workflow state, audit trails |
+| 8 | Database persistence | ✅ Complete | SQLite, SQLModel, migrations |
+| 9 | Per-agent models | ✅ Complete | Model routing, cost optimization |
+| 10 | Multi-file features | ❌ Not Started | Context management, project analysis |
+| 11 | Observability | ✅ Complete | Logging, tracing, error handling |
+| 12 | Auth & multi-tenancy | ❌ Not Started | Security, user isolation |

@@ -39,30 +39,59 @@ def generate_task_id() -> str:
     return f"team-{uuid.uuid4().hex[:12]}"
 
 
+def build_team_status(task_id: str) -> TeamWorkflowStatus:
+    """
+    Build detailed status from stored workflow data.
+    """
+    if task_id not in _active_workflows:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    workflow = _active_workflows[task_id]
+    state = workflow.get("state", {})
+
+    return TeamWorkflowStatus(
+        task_id=task_id,
+        status=workflow.get("status", "unknown"),
+        user_request=state.get("user_request", ""),
+        artifacts=state.get("artifacts", []),
+        messages=[
+            {
+                "role": msg.name if hasattr(msg, "name") else "system",
+                "content": msg.content,
+            }
+            for msg in state.get("messages", [])
+        ],
+        ba_complete=state.get("ba_result") is not None,
+        dev_complete=state.get("dev_result") is not None,
+        tester_complete=state.get("tester_result") is not None,
+        iteration_count=state.get("iteration_count", 0),
+        error=workflow.get("error"),
+    )
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
 
 
-@router.post("/chat", response_model=TeamChatResponse)
+@router.post("/chat", response_model=TeamWorkflowStatus)
 async def team_chat(request: TeamChatRequest) -> TeamChatResponse:
     """
-    Start a new team workflow with the multi-agent system.
+    Start a new team workflow with the multi-agent system and return full details.
 
-    This endpoint initiates a LangGraph workflow where:
+    This synchronous endpoint runs the complete LangGraph workflow:
     1. Manager analyzes the request
     2. Routes to appropriate agents (BA → Dev → Tester)
     3. Agents execute and return results
-    4. Manager synthesizes final response
+    4. Returns complete status with messages, artifacts, etc.
 
-    **Note:** This is a synchronous endpoint. For long-running workflows,
-    use `/chat/async` or poll `/status/{task_id}`.
+    **Note:** For async, use `/chat/async` and poll `/status/{task_id}`.
 
     Args:
         request: TeamChatRequest with message and optional project_id
 
     Returns:
-        TeamChatResponse with task_id and status
+        TeamWorkflowStatus with full workflow details (messages, artifacts, agent results)
     """
     task_id = generate_task_id()
 
@@ -81,11 +110,7 @@ async def team_chat(request: TeamChatRequest) -> TeamChatResponse:
             "state": final_state,
         }
 
-        return TeamChatResponse(
-            task_id=task_id,
-            status=final_state.get("status", "completed"),
-            message=final_state.get("final_response") or "Workflow completed.",
-        )
+        return build_team_status(task_id)
 
     except Exception as e:
         _active_workflows[task_id] = {
@@ -94,11 +119,7 @@ async def team_chat(request: TeamChatRequest) -> TeamChatResponse:
             "error": str(e),
         }
 
-        return TeamChatResponse(
-            task_id=task_id,
-            status="failed",
-            message=f"Workflow failed: {str(e)}",
-        )
+        return build_team_status(task_id)
 
 
 @router.post("/chat/async", response_model=TeamChatResponse)
@@ -171,30 +192,7 @@ async def get_team_status(task_id: str) -> TeamWorkflowStatus:
     Returns:
         TeamWorkflowStatus with current state and results
     """
-    if task_id not in _active_workflows:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-
-    workflow = _active_workflows[task_id]
-    state = workflow.get("state", {})
-
-    return TeamWorkflowStatus(
-        task_id=task_id,
-        status=workflow.get("status", "unknown"),
-        user_request=state.get("user_request", ""),
-        artifacts=state.get("artifacts", []),
-        messages=[
-            {
-                "role": msg.name if hasattr(msg, "name") else "system",
-                "content": msg.content,
-            }
-            for msg in state.get("messages", [])
-        ],
-        ba_complete=state.get("ba_result") is not None,
-        dev_complete=state.get("dev_result") is not None,
-        tester_complete=state.get("tester_result") is not None,
-        iteration_count=state.get("iteration_count", 0),
-        error=workflow.get("error"),
-    )
+    return build_team_status(task_id)
 
 
 @router.get("/status/{task_id}/artifacts")
