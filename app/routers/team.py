@@ -7,13 +7,19 @@ LangGraph-based multi-agent team (Manager, BA, Dev, Tester).
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.agents.team import run_team_workflow, build_team_graph
+from app.agents.team import (
+    run_team_workflow,
+    run_team_workflow_stream,
+    build_team_graph,
+)
 from app.models.state import TeamState
 from app.models.schemas import (
     TeamChatRequest,
@@ -224,15 +230,91 @@ async def team_chat_stream(request: TeamChatRequest):
     """
     Stream team workflow progress via SSE (Server-Sent Events).
 
-    **Note:** This is a placeholder for future SSE implementation.
-    Currently returns the same as /chat.
+    This endpoint streams real-time updates as the workflow progresses:
+    - node_start: When a new agent node starts processing
+    - node_end: When an agent node completes
+    - token: When new content is generated
+    - agent_result: When an agent completes their task
+    - done: When the workflow completes
+
+    The response is formatted as SSE (Server-Sent Events) with the following format:
+    event: <event_type>
+    data: <json_data>
 
     Args:
-        request: TeamChatRequest
+        request: TeamChatRequest with message and optional project_id
 
     Returns:
-        StreamingResponse (TODO: implement SSE)
+        StreamingResponse with text/event-stream media type
     """
-    # TODO: Implement SSE streaming
-    # For now, just return the regular response
-    return await team_chat(request)
+
+    async def event_generator():
+        """Generate SSE events from the team workflow stream."""
+        try:
+            # Generate task_id for tracking
+            task_id = generate_task_id()
+
+            # Send initial task_id
+            yield f"event: task_id\ndata: {json.dumps({'task_id': task_id})}\n\n"
+
+            # Stream the workflow
+            async for event in run_team_workflow_stream(
+                user_request=request.message,
+                project_id=request.project_id,
+                max_iterations=request.max_iterations,
+            ):
+                event_type = event.get("type", "unknown")
+
+                # Format data based on event type
+                if event_type == "token":
+                    data = {
+                        "agent": event.get("agent", "assistant"),
+                        "content": event.get("content", ""),
+                        "node": event.get("node"),
+                    }
+                elif event_type == "node_start":
+                    data = {
+                        "node": event.get("node"),
+                        "iteration": event.get("iteration", 0),
+                    }
+                elif event_type == "node_end":
+                    data = {
+                        "node": event.get("node"),
+                        "status": event.get("status"),
+                    }
+                elif event_type == "agent_result":
+                    data = {
+                        "agent": event.get("agent"),
+                        "status": event.get("status"),
+                        "result": event.get("result"),
+                    }
+                elif event_type == "done":
+                    data = {
+                        "status": event.get("status"),
+                        "iteration": event.get("iteration"),
+                        "artifacts": event.get("artifacts", []),
+                        "final_response": event.get("final_response"),
+                    }
+                elif event_type == "error":
+                    data = {
+                        "error": event.get("error"),
+                    }
+                else:
+                    data = event
+
+                # Yield SSE format
+                yield f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+        except Exception as e:
+            # Send error event
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
+    )

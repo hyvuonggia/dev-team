@@ -125,6 +125,144 @@ def build_team_graph() -> StateGraph:
 # ============================================================================
 
 
+async def run_team_workflow_stream(
+    user_request: str,
+    project_id: str | None = None,
+    max_iterations: int = 10,
+):
+    """
+    Stream the team workflow execution using LangGraph's astream.
+
+    This function yields events as the workflow progresses through each agent.
+
+    Args:
+        user_request: The user's request text
+        project_id: Optional project ID for workspace isolation
+        max_iterations: Maximum iterations before forcing completion
+
+    Yields:
+        dict: Event data with type 'token', 'tool_call', 'tool_result', 'node_start',
+              'node_end', 'error', or 'done'
+    """
+    from langchain_core.messages import HumanMessage, AIMessage
+
+    logger.info("=" * 70)
+    logger.info("🚀 TEAM WORKFLOW (STREAM): Starting execution")
+    logger.info(f"   Request: {user_request[:60]}...")
+    logger.info(f"   Project: {project_id or 'default'}")
+    logger.info(f"   Max Iterations: {max_iterations}")
+    logger.info("=" * 70)
+
+    # Build the graph
+    graph = build_team_graph()
+    logger.info("📊 Graph compiled successfully")
+
+    # Initialize state
+    initial_state: TeamState = {
+        "user_request": user_request,
+        "project_id": project_id,
+        "messages": [HumanMessage(content=user_request)],
+        "next_agent": "manager",
+        "task": None,
+        "ba_result": None,
+        "dev_result": None,
+        "tester_result": None,
+        "artifacts": [],
+        "status": "pending",
+        "clarifying_questions": [],
+        "final_response": None,
+        "error_message": None,
+        "iteration_count": 0,
+        "max_iterations": max_iterations,
+    }
+
+    # Track previous node for node_end events
+    previous_node = None
+
+    try:
+        # Use astream with stream_mode="values" to get state updates
+        async for event in graph.astream(initial_state, stream_mode="values"):
+            current_node = event.get("__metadata", {}).get("langgraph_node", None)
+
+            # Node started event
+            if current_node and current_node != previous_node:
+                if previous_node:
+                    # Emit node_end for previous node
+                    yield {
+                        "type": "node_end",
+                        "node": previous_node,
+                        "status": "completed",
+                    }
+                # Emit node_start for current node
+                yield {
+                    "type": "node_start",
+                    "node": current_node,
+                    "iteration": event.get("iteration_count", 0),
+                }
+                previous_node = current_node
+
+            # Check for messages in the event
+            messages = event.get("messages", [])
+            if messages:
+                latest_msg = messages[-1]
+                if hasattr(latest_msg, "content") and latest_msg.content:
+                    # Determine the agent name
+                    agent_name = (
+                        getattr(latest_msg, "name", None) or current_node or "assistant"
+                    )
+
+                    yield {
+                        "type": "token",
+                        "agent": agent_name,
+                        "content": latest_msg.content,
+                        "node": current_node,
+                    }
+
+            # Check for agent results
+            if event.get("ba_result"):
+                yield {
+                    "type": "agent_result",
+                    "agent": "ba",
+                    "status": "completed",
+                    "result": "BA analysis complete",
+                }
+
+            if event.get("dev_result"):
+                artifacts = event.get("artifacts", [])
+                yield {
+                    "type": "agent_result",
+                    "agent": "dev",
+                    "status": "completed",
+                    "result": f"Dev implementation complete - {len(artifacts)} files created",
+                }
+
+            if event.get("tester_result"):
+                yield {
+                    "type": "agent_result",
+                    "agent": "tester",
+                    "status": "completed",
+                    "result": "Tester review complete",
+                }
+
+            # Check for status
+            status = event.get("status", "")
+            if status in ["completed", "failed", "waiting_for_clarification"]:
+                yield {
+                    "type": "done",
+                    "status": status,
+                    "iteration": event.get("iteration_count", 0),
+                    "artifacts": event.get("artifacts", []),
+                    "final_response": event.get("final_response"),
+                }
+
+    except Exception as e:
+        logger.error(f"Streaming error: {e}", exc_info=True)
+        yield {
+            "type": "error",
+            "error": str(e),
+        }
+
+
 async def run_team_workflow(
     user_request: str,
     project_id: str | None = None,
