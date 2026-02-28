@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlmodel import SQLModel, Field
 
@@ -11,8 +11,8 @@ class Session(SQLModel, table=True):
     __tablename__ = "sessions"
 
     id: str = Field(primary_key=True, index=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Message(SQLModel, table=True):
@@ -24,7 +24,7 @@ class Message(SQLModel, table=True):
     session_id: str = Field(foreign_key="sessions.id", index=True)
     role: str = Field(index=True)  # "human", "ai", "system"
     content: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Task(SQLModel, table=True):
@@ -56,8 +56,8 @@ class Task(SQLModel, table=True):
     agent_messages: str = Field(
         default="", description="JSON-encoded agent conversation history"
     )
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: Optional[str] = Field(None, description="Error if task failed")
     retry_count: int = Field(default=0, description="Number of retry attempts")
     max_retries: int = Field(default=3, description="Maximum retry attempts")

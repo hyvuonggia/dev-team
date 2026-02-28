@@ -12,7 +12,6 @@ import ast
 import re
 
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.models.schemas import (
@@ -25,7 +24,7 @@ from app.models.schemas import (
     TestValidationResult,
 )
 from app.tools.file_tools import _read_file_impl, _list_files_impl
-from app.agents.config import get_agent_config
+from app.agents.config import get_agent_config, get_llm_for_agent
 from app.agents.test_runner import (
     run_tests_sandboxed,
     estimate_coverage,
@@ -339,14 +338,9 @@ async def review_and_generate_tests(
         context_text = "\n".join(context_parts)
 
     # Step 6: Initialize LLM with structured output
-    # Load temperature from agent config (single source of truth)
+    # Load config once (cached via get_config singleton)
     agent_config = get_agent_config("tester")
-    llm = ChatOpenAI(
-        model=agent_config.model or settings.OPENAI_MODEL,
-        api_key=settings.OPENROUTER_API_KEY,
-        base_url=settings.OPENAI_API_BASE,
-        temperature=agent_config.temperature,
-    )
+    llm = get_llm_for_agent(agent_config)
 
     structured_llm = llm.with_structured_output(
         TestPlan,
@@ -371,8 +365,6 @@ Generate a complete test plan following the required JSON schema. Include:
 6. Total effort estimate"""
 
     # Step 8: Prepare messages
-    # Load system prompt from config (single source of truth)
-    agent_config = get_agent_config("tester")
     messages = [
         SystemMessage(content=agent_config.system_prompt),
         HumanMessage(content=prompt_content),

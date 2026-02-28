@@ -1,46 +1,73 @@
 from __future__ import annotations
 
-from dotenv import load_dotenv
-import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
-# Load .env file if present (matches previous behavior using pydantic's env_file)
-load_dotenv(dotenv_path=".env")
 
 # Get the project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
-class Settings:
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables with validation.
+
+    Uses pydantic-settings for automatic env var loading, type coercion,
+    and .env file support. All fields are validated at startup.
+    """
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
     # API Keys
-    OPENROUTER_API_KEY: Optional[str] = os.getenv("OPENROUTER_API_KEY")
+    OPENROUTER_API_KEY: Optional[str] = Field(
+        default=None, description="OpenRouter API key"
+    )
 
     # OpenAI/OpenRouter Configuration
-    OPENAI_API_BASE: str = (
-        os.getenv("OPENAI_API_BASE") or "https://openrouter.ai/api/v1"
+    OPENAI_API_BASE: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description="Base URL for the OpenAI-compatible API",
     )
-    # model to use for ChatOpenAI
-    OPENAI_MODEL: Optional[str] = os.getenv("OPENAI_MODEL")
+    OPENAI_MODEL: Optional[str] = Field(
+        default=None, description="Default model to use for ChatOpenAI"
+    )
 
     # Database URL for SQLite (default to local file with absolute path)
-    DATABASE_URL: str = (
-        os.getenv("DATABASE_URL") or f"sqlite:///{PROJECT_ROOT}/chat_history.db"
+    DATABASE_URL: str = Field(
+        default=f"sqlite:///{PROJECT_ROOT}/chat_history.db",
+        description="SQLAlchemy database URL",
     )
 
     # Logging Configuration
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    LOG_DIR: str = os.getenv("LOG_DIR", "logs")
+    LOG_LEVEL: str = Field(default="INFO", description="Logging level")
+    LOG_DIR: str = Field(default="logs", description="Directory for log files")
 
     # LangSmith Configuration (for tracing)
-    LANGSMITH_API_KEY: Optional[str] = os.getenv("LANGSMITH_API_KEY")
-    LANGSMITH_ENDPOINT: Optional[str] = os.getenv("LANGSMITH_ENDPOINT")
-    LANGSMITH_PROJECT: str = os.getenv("LANGSMITH_PROJECT", "dev-team")
-    # Enable LangSmith tracing
-    LANGCHAIN_TRACING_V2: bool = (
-        os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
+    LANGSMITH_API_KEY: Optional[str] = Field(
+        default=None, description="LangSmith API key for tracing"
+    )
+    LANGSMITH_ENDPOINT: Optional[str] = Field(
+        default=None, description="LangSmith endpoint URL"
+    )
+    LANGSMITH_PROJECT: str = Field(
+        default="dev-team", description="LangSmith project name"
+    )
+    LANGCHAIN_TRACING_V2: bool = Field(
+        default=False, description="Enable LangSmith tracing"
     )
 
 
-settings = Settings()
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return a cached Settings instance.
+
+    Uses lru_cache so the .env file is only read once per process.
+    """
+    return Settings()
+
+
+# Module-level convenience alias for backward compatibility
+settings = get_settings()

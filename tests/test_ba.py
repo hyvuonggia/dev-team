@@ -18,7 +18,6 @@ from app.agents.ba import (
     canonicalize_whitespace,
     validate_request,
     run_ba_analysis,
-    BA_SYSTEM_PROMPT,
 )
 from app.models.schemas import BAResponse, UserStory
 
@@ -128,8 +127,8 @@ class TestRunBAAnalysis:
             priority=None,
         )
 
-        with patch("app.agents.ba.ChatOpenAI") as mock_llm_class:
-            mock_llm = mock_llm_class.return_value
+        with patch("app.agents.ba.get_llm_for_agent") as mock_get_llm:
+            mock_llm = mock_get_llm.return_value
             # Mock with_structured_output to return a mock that directly returns BAResponse
             mock_structured = AsyncMock()
             mock_structured.ainvoke = AsyncMock(return_value=mock_ba_response)
@@ -173,8 +172,8 @@ class TestRunBAAnalysis:
             priority="high",
         )
 
-        with patch("app.agents.ba.ChatOpenAI") as mock_llm_class:
-            mock_llm = mock_llm_class.return_value
+        with patch("app.agents.ba.get_llm_for_agent") as mock_get_llm:
+            mock_llm = mock_get_llm.return_value
             # Mock with_structured_output to return a mock that directly returns BAResponse
             mock_structured = AsyncMock()
             mock_structured.ainvoke = AsyncMock(return_value=mock_ba_response)
@@ -214,9 +213,12 @@ class TestRunBAAnalysis:
     @pytest.mark.asyncio
     async def test_llm_failure_returns_error(self, mock_settings):
         """LLM call failure should return error status."""
-        with patch("app.agents.ba.ChatOpenAI") as mock_llm_class:
-            mock_llm = mock_llm_class.return_value
-            mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM Error"))
+        with patch("app.agents.ba.get_llm_for_agent") as mock_get_llm:
+            mock_llm = mock_get_llm.return_value
+            # Mock with_structured_output to return a mock whose ainvoke raises
+            mock_structured = AsyncMock()
+            mock_structured.ainvoke = AsyncMock(side_effect=Exception("LLM Error"))
+            mock_llm.with_structured_output = Mock(return_value=mock_structured)
 
             result = await run_ba_analysis("Build something")
 
@@ -226,8 +228,8 @@ class TestRunBAAnalysis:
     @pytest.mark.asyncio
     async def test_structured_output_failure_returns_error(self, mock_settings):
         """Structured output failure from LLM should return error status."""
-        with patch("app.agents.ba.ChatOpenAI") as mock_llm_class:
-            mock_llm = mock_llm_class.return_value
+        with patch("app.agents.ba.get_llm_for_agent") as mock_get_llm:
+            mock_llm = mock_get_llm.return_value
             # Mock with_structured_output to raise an exception
             mock_structured = AsyncMock()
             mock_structured.ainvoke = AsyncMock(
@@ -251,8 +253,8 @@ class TestRunBAAnalysis:
             priority=None,
         )
 
-        with patch("app.agents.ba.ChatOpenAI") as mock_llm_class:
-            mock_llm = mock_llm_class.return_value
+        with patch("app.agents.ba.get_llm_for_agent") as mock_get_llm:
+            mock_llm = mock_get_llm.return_value
             # Mock with_structured_output to return a mock that directly returns BAResponse
             mock_structured = AsyncMock()
             mock_structured.ainvoke = AsyncMock(return_value=mock_ba_response)
@@ -354,8 +356,8 @@ class TestEdgeCases:
                 priority="high",
             )
 
-            with patch("app.agents.ba.ChatOpenAI") as mock_llm_class:
-                mock_llm = mock_llm_class.return_value
+            with patch("app.agents.ba.get_llm_for_agent") as mock_get_llm:
+                mock_llm = mock_get_llm.return_value
                 # Mock with_structured_output to return a mock that directly returns BAResponse
                 mock_structured = AsyncMock()
                 mock_structured.ainvoke = AsyncMock(return_value=mock_ba_response)

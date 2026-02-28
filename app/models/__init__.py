@@ -26,7 +26,6 @@ from app.models.schemas import (
 
 from app.models.state import (
     TeamState,
-    RouterDecision,
 )
 
 __all__ = [
@@ -54,5 +53,4 @@ __all__ = [
     "ManagerStatusResponse",
     # LangGraph State
     "TeamState",
-    "RouterDecision",
 ]

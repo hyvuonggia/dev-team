@@ -12,6 +12,7 @@ It defines the graph topology with:
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 
 from langgraph.graph import StateGraph, START, END
 
@@ -22,7 +23,7 @@ from app.agents.workers import ba_node, dev_node, tester_node
 logger = logging.getLogger(__name__)
 
 
-def build_team_graph() -> StateGraph:
+def build_team_graph():
     """
     Build and compile the LangGraph StateGraph for the AI Dev Team.
 
@@ -120,6 +121,13 @@ def build_team_graph() -> StateGraph:
     return compiled_graph
 
 
+# Cached compiled graph singleton — avoids recompiling on every request
+@lru_cache(maxsize=1)
+def get_team_graph():
+    """Return the compiled team graph, cached after first build."""
+    return build_team_graph()
+
+
 # ============================================================================
 # Convenience Functions
 # ============================================================================
@@ -153,9 +161,9 @@ async def run_team_workflow_stream(
     logger.info(f"   Max Iterations: {max_iterations}")
     logger.info("=" * 70)
 
-    # Build the graph
-    graph = build_team_graph()
-    logger.info("📊 Graph compiled successfully")
+    # Use the cached compiled graph
+    graph = get_team_graph()
+    logger.info("📊 Graph ready (cached)")
 
     # Initialize state
     initial_state: TeamState = {
@@ -180,80 +188,86 @@ async def run_team_workflow_stream(
     previous_node = None
 
     try:
-        # Use astream with stream_mode="values" to get state updates
-        async for event in graph.astream(initial_state, stream_mode="values"):
-            current_node = event.get("__metadata", {}).get("langgraph_node", None)
-
-            # Node started event
-            if current_node and current_node != previous_node:
-                if previous_node:
-                    # Emit node_end for previous node
+        # Use astream with stream_mode="updates" to get node-keyed state updates
+        async for event in graph.astream(initial_state, stream_mode="updates"):
+            # In "updates" mode, event is a dict keyed by node name
+            # e.g. {"manager": {"next_agent": "ba", "messages": [...]}}
+            for current_node, node_output in event.items():
+                # Node started event
+                if current_node != previous_node:
+                    if previous_node:
+                        # Emit node_end for previous node
+                        yield {
+                            "type": "node_end",
+                            "node": previous_node,
+                            "status": "completed",
+                        }
+                    # Emit node_start for current node
                     yield {
-                        "type": "node_end",
-                        "node": previous_node,
-                        "status": "completed",
-                    }
-                # Emit node_start for current node
-                yield {
-                    "type": "node_start",
-                    "node": current_node,
-                    "iteration": event.get("iteration_count", 0),
-                }
-                previous_node = current_node
-
-            # Check for messages in the event
-            messages = event.get("messages", [])
-            if messages:
-                latest_msg = messages[-1]
-                if hasattr(latest_msg, "content") and latest_msg.content:
-                    # Determine the agent name
-                    agent_name = (
-                        getattr(latest_msg, "name", None) or current_node or "assistant"
-                    )
-
-                    yield {
-                        "type": "token",
-                        "agent": agent_name,
-                        "content": latest_msg.content,
+                        "type": "node_start",
                         "node": current_node,
+                        "iteration": node_output.get("iteration_count", 0)
+                        if isinstance(node_output, dict)
+                        else 0,
+                    }
+                    previous_node = current_node
+
+                if not isinstance(node_output, dict):
+                    continue
+
+                # Check for messages in the node output
+                messages = node_output.get("messages", [])
+                if messages:
+                    latest_msg = messages[-1]
+                    if hasattr(latest_msg, "content") and latest_msg.content:
+                        agent_name = (
+                            getattr(latest_msg, "name", None)
+                            or current_node
+                            or "assistant"
+                        )
+                        yield {
+                            "type": "token",
+                            "agent": agent_name,
+                            "content": latest_msg.content,
+                            "node": current_node,
+                        }
+
+                # Check for agent results
+                if node_output.get("ba_result"):
+                    yield {
+                        "type": "agent_result",
+                        "agent": "ba",
+                        "status": "completed",
+                        "result": "BA analysis complete",
                     }
 
-            # Check for agent results
-            if event.get("ba_result"):
-                yield {
-                    "type": "agent_result",
-                    "agent": "ba",
-                    "status": "completed",
-                    "result": "BA analysis complete",
-                }
+                if node_output.get("dev_result"):
+                    artifacts = node_output.get("artifacts", [])
+                    yield {
+                        "type": "agent_result",
+                        "agent": "dev",
+                        "status": "completed",
+                        "result": f"Dev implementation complete - {len(artifacts)} files created",
+                    }
 
-            if event.get("dev_result"):
-                artifacts = event.get("artifacts", [])
-                yield {
-                    "type": "agent_result",
-                    "agent": "dev",
-                    "status": "completed",
-                    "result": f"Dev implementation complete - {len(artifacts)} files created",
-                }
+                if node_output.get("tester_result"):
+                    yield {
+                        "type": "agent_result",
+                        "agent": "tester",
+                        "status": "completed",
+                        "result": "Tester review complete",
+                    }
 
-            if event.get("tester_result"):
-                yield {
-                    "type": "agent_result",
-                    "agent": "tester",
-                    "status": "completed",
-                    "result": "Tester review complete",
-                }
-
-            # Check for status
-            status = event.get("status", "")
-            if status in ["completed", "failed", "waiting_for_clarification"]:
-                yield {
-                    "type": "done",
-                    "status": status,
-                    "iteration": event.get("iteration_count", 0),
-                    "artifacts": event.get("artifacts", []),
-                    "final_response": event.get("final_response"),
-                }
+                # Check for completion status
+                status = node_output.get("status", "")
+                if status in ("completed", "failed", "waiting_for_clarification"):
+                    yield {
+                        "type": "done",
+                        "status": status,
+                        "iteration": node_output.get("iteration_count", 0),
+                        "artifacts": node_output.get("artifacts", []),
+                        "final_response": node_output.get("final_response"),
+                    }
 
     except Exception as e:
         logger.error(f"Streaming error: {e}", exc_info=True)
@@ -288,9 +302,9 @@ async def run_team_workflow(
     logger.info(f"   Max Iterations: {max_iterations}")
     logger.info("=" * 70)
 
-    # Build the graph
-    graph = build_team_graph()
-    logger.info("📊 Graph compiled successfully")
+    # Use the cached compiled graph
+    graph = get_team_graph()
+    logger.info("📊 Graph ready (cached)")
 
     # Initialize state
     initial_state: TeamState = {

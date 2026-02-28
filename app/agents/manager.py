@@ -20,11 +20,10 @@ from pydantic import BaseModel, Field
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.models.state import TeamState
-from app.agents.config import get_agent_config
+from app.agents.config import get_agent_config, get_llm, get_llm_for_agent
 
 logger = logging.getLogger(__name__)
 
@@ -151,12 +150,7 @@ async def manager_node(state: TeamState) -> dict:
 
         # Initialize LLM
         agent_config = get_agent_config("manager")
-        llm = ChatOpenAI(
-            model=agent_config.model or settings.OPENAI_MODEL,
-            api_key=settings.OPENROUTER_API_KEY,
-            base_url=settings.OPENAI_API_BASE,
-            temperature=agent_config.temperature,
-        )
+        llm = get_llm_for_agent(agent_config)
 
         # Create prompt template using config-loaded system prompt
         prompt = ChatPromptTemplate.from_messages(
@@ -363,12 +357,10 @@ async def _generate_final_response(state: TeamState) -> str:
         return _build_simple_response(state)
 
     try:
-        # Use the same model as the Manager
+        # Use the same model as the Manager, with slightly higher temperature for natural response
         agent_config = get_agent_config("manager")
-        llm = ChatOpenAI(
-            model=agent_config.model or settings.OPENAI_MODEL,
-            api_key=settings.OPENROUTER_API_KEY,
-            base_url=settings.OPENAI_API_BASE,
+        llm = get_llm(
+            model=agent_config.model,
             temperature=0.7,
         )
 

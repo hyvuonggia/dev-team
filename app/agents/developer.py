@@ -12,7 +12,6 @@ import tempfile
 from typing import Optional, List, Dict, Any
 
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.models.schemas import (
@@ -23,7 +22,7 @@ from app.models.schemas import (
     UserStory,
 )
 from app.tools.file_tools import _write_file_impl
-from app.agents.config import get_agent_config
+from app.agents.config import get_agent_config, get_llm_for_agent
 
 
 # ============================================================================
@@ -239,14 +238,9 @@ async def generate_implementation(
 
     # Step 3: Initialize LLM with structured output
     # Using with_structured_output guarantees valid JSON matching DevResponse schema
-    # Load temperature from agent config (single source of truth)
+    # Load config once (cached via get_config singleton)
     agent_config = get_agent_config("dev")
-    llm = ChatOpenAI(
-        model=agent_config.model or settings.OPENAI_MODEL,
-        api_key=settings.OPENROUTER_API_KEY,
-        base_url=settings.OPENAI_API_BASE,
-        temperature=agent_config.temperature,
-    )
+    llm = get_llm_for_agent(agent_config)
 
     # Bind structured output using Pydantic model
     # This uses the model's native structured output capabilities
@@ -273,8 +267,6 @@ Description:
 Generate a complete implementation following the required JSON schema with plan, files, and explanations."""
 
     # Step 6: Prepare messages
-    # Load system prompt from config (single source of truth)
-    agent_config = get_agent_config("dev")
     messages = [
         SystemMessage(content=agent_config.system_prompt),
         HumanMessage(content=prompt_content),

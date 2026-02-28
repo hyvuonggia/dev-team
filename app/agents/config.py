@@ -1,15 +1,19 @@
 """Agent configuration loader.
 
 Loads agent personas and settings from agent_config.yaml.
+Provides cached LLM factory to avoid recreating identical instances.
 """
 
 from __future__ import annotations
 
 import os
 import yaml
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 from pydantic import BaseModel, Field
+from langchain_openai import ChatOpenAI
+
+from app.config import settings
 
 
 class AgentConfig(BaseModel):
@@ -44,14 +48,14 @@ def load_agent_config(config_path: Optional[str] = None) -> AgentsConfig:
     if config_path is None:
         # Default to project root
         project_root = Path(__file__).parent.parent.parent
-        config_path = project_root / "agent_config.yaml"
+        resolved_path = project_root / "agent_config.yaml"
     else:
-        config_path = Path(config_path)
+        resolved_path = Path(config_path)
 
-    if not config_path.exists():
-        raise FileNotFoundError(f"Agent config file not found: {config_path}")
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"Agent config file not found: {resolved_path}")
 
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(resolved_path, "r", encoding="utf-8") as f:
         config_data = yaml.safe_load(f)
 
     return AgentsConfig(**config_data)
@@ -61,6 +65,9 @@ def get_agent_config(agent_name: str, config_path: Optional[str] = None) -> Agen
     """
     Get configuration for a specific agent.
 
+    Uses the cached config via get_config() for default path,
+    falls back to load_agent_config() only when a custom path is provided.
+
     Args:
         agent_name: Name of the agent (ba, dev, tester, manager)
         config_path: Optional path to config file
@@ -68,7 +75,7 @@ def get_agent_config(agent_name: str, config_path: Optional[str] = None) -> Agen
     Returns:
         AgentConfig for the specified agent
     """
-    all_configs = load_agent_config(config_path)
+    all_configs = load_agent_config(config_path) if config_path else get_config()
 
     agent_map = {
         "ba": all_configs.ba,
@@ -102,3 +109,68 @@ def get_config() -> AgentsConfig:
     if _config_cache is None:
         _config_cache = load_agent_config()
     return _config_cache
+
+
+# ============================================================================
+# LLM Instance Cache
+# ============================================================================
+
+# Cache key: (model, temperature, base_url) -> ChatOpenAI instance
+_llm_cache: Dict[Tuple[str, float, str], ChatOpenAI] = {}
+
+
+def get_llm(
+    model: Optional[str] = None,
+    temperature: float = 0.7,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> ChatOpenAI:
+    """
+    Get a cached ChatOpenAI instance.
+
+    Returns an existing instance if one with the same (model, temperature, base_url)
+    already exists, otherwise creates and caches a new one.
+
+    Args:
+        model: Model name (defaults to settings.OPENAI_MODEL)
+        temperature: Temperature for generation
+        base_url: API base URL (defaults to settings.OPENAI_API_BASE)
+        api_key: API key (defaults to settings.OPENROUTER_API_KEY)
+
+    Returns:
+        Cached ChatOpenAI instance
+    """
+    resolved_model = model or settings.OPENAI_MODEL
+    resolved_base_url = base_url or settings.OPENAI_API_BASE
+    resolved_api_key = api_key or settings.OPENROUTER_API_KEY
+
+    cache_key = (resolved_model, temperature, resolved_base_url)
+
+    if cache_key not in _llm_cache:
+        _llm_cache[cache_key] = ChatOpenAI(
+            model=resolved_model,
+            api_key=resolved_api_key,
+            base_url=resolved_base_url,
+            temperature=temperature,
+        )
+
+    return _llm_cache[cache_key]
+
+
+def get_llm_for_agent(agent_config: AgentConfig) -> ChatOpenAI:
+    """
+    Get a cached ChatOpenAI instance configured for a specific agent.
+
+    Convenience wrapper around get_llm() that extracts parameters
+    from an AgentConfig object.
+
+    Args:
+        agent_config: Agent configuration with model and temperature
+
+    Returns:
+        Cached ChatOpenAI instance
+    """
+    return get_llm(
+        model=agent_config.model,
+        temperature=agent_config.temperature,
+    )

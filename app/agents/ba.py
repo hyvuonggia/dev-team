@@ -11,11 +11,10 @@ import re
 from typing import Optional, Dict, Any, List
 
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.models.schemas import BAResponse
-from app.agents.config import get_agent_config
+from app.agents.config import get_agent_config, get_llm_for_agent
 
 
 # ============================================================================
@@ -83,14 +82,9 @@ async def run_ba_analysis(
 
     # Step 4: Initialize LLM with structured output
     # Using with_structured_output guarantees valid JSON matching BAResponse schema
-    # Load temperature from agent config (single source of truth)
+    # Load config once (cached via get_config singleton)
     agent_config = get_agent_config("ba")
-    llm = ChatOpenAI(
-        model=agent_config.model or settings.OPENAI_MODEL,
-        api_key=settings.OPENROUTER_API_KEY,
-        base_url=settings.OPENAI_API_BASE,
-        temperature=agent_config.temperature,
-    )
+    llm = get_llm_for_agent(agent_config)
 
     # Bind structured output using Pydantic model
     # This uses the model's native structured output capabilities
@@ -100,8 +94,6 @@ async def run_ba_analysis(
     )
 
     # Step 5: Prepare messages
-    # Load system prompt from config (single source of truth)
-    agent_config = get_agent_config("ba")
     messages = [
         SystemMessage(content=agent_config.system_prompt),
         HumanMessage(content=cleaned_text),

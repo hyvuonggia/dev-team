@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 from langchain_core.chat_history import BaseChatMessageHistory
@@ -149,7 +149,7 @@ class SQLiteChatMessageHistory(BaseChatMessageHistory):
             # Update session's updated_at timestamp
             db_session = session.get(DBSession, self._session_id)
             if db_session:
-                db_session.updated_at = datetime.utcnow()
+                db_session.updated_at = datetime.now(timezone.utc)
 
     def clear(self) -> None:
         """Clear all messages for this session."""

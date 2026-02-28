@@ -100,13 +100,3 @@ class TeamState(TypedDict):
 
     max_iterations: int
     """Maximum allowed iterations before forcing completion."""
-
-
-class RouterDecision(TypedDict):
-    """Structured output from the Manager's routing decision."""
-
-    next_agent: str
-    """Next agent to invoke: 'ba', 'dev', 'tester', or 'FINISH'"""
-
-    reasoning: str
-    """Explanation of why this agent was chosen."""

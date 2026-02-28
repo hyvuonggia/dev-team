@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 
@@ -425,8 +425,8 @@ class Task(BaseModel):
     agent_messages: List[dict] = Field(
         default_factory=list, description="Agent conversation history"
     )
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: Optional[str] = Field(None, description="Error if task failed")
 
 
@@ -460,7 +460,7 @@ class AgentCallLog(BaseModel):
     """Log entry for an agent call."""
 
     agent: str = Field(..., description="Agent that was called (ba/dev/tester)")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = Field(..., description="Status: success, error, retry")
     input_summary: str = Field(..., description="Brief summary of input")
     output_summary: str = Field(..., description="Brief summary of output")
